@@ -645,13 +645,8 @@ const getSortedProxies = (): ProxyConfig[] => {
   });
 };
 
-/**
- * Reset proxy stats for a specific proxy
- */
-const resetProxyStats = (proxyName: string): void => {
-  proxyFailureCount.set(proxyName, 0);
-  proxyLatencyMap.delete(proxyName);
-};
+// NOTE: REMOVED DUPLICATE resetProxyStats function that was here (around line 651)
+// The exported version is at the bottom of the file
 
 /**
  * Fetch with smart proxy rotation and automatic failover
@@ -2167,7 +2162,6 @@ export const splitContentIntoBlocks = (html: string): string[] => {
 
   const blocks: string[] = [];
   let currentBlock = '';
-  let depth = 0;
 
   // Simple tokenization approach
   const regex = /(<\/?(p|h[1-6]|div|section|article|blockquote|ul|ol|table|figure|pre)[^>]*>)/gi;
@@ -2340,7 +2334,7 @@ export const runConcurrent = async <T, R>(
 };
 
 // ============================================================================
-// DEBOUNCE UTILITY
+// DEBOUNCE & THROTTLE UTILITIES
 // ============================================================================
 
 /**
@@ -2393,28 +2387,8 @@ export const throttle = <T extends (...args: any[]) => any>(
 };
 
 // ============================================================================
-// PRODUCT BOX HTML GENERATION
+// PRODUCT BOX HTML GENERATION (CONTINUED)
 // ============================================================================
-
-/**
- * Generate product box HTML based on deployment mode
- */
-export const generateProductBoxHtml = (
-  product: ProductDetails,
-  affiliateTag: string,
-  mode: DeploymentMode = 'ELITE_BENTO'
-): string => {
-  const tag = affiliateTag || 'amzwp-20';
-  const amazonUrl = `https://www.amazon.com/dp/${product.asin}?tag=${tag}`;
-  const stars = Math.min(5, Math.max(0, Math.round(product.rating || 4.5)));
-  const currentDate = new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-
-  if (mode === 'TACTICAL_LINK') {
-    return generateTacticalLinkHtml(product, amazonUrl, stars, tag);
-  }
-
-  return generateEliteBentoHtml(product, amazonUrl, stars, tag, currentDate);
-};
 
 /**
  * Generate Tactical Link style product box
@@ -2550,9 +2524,9 @@ export const generateComparisonTableHtml = (
 
   if (tableProducts.length < 2) return '';
 
-  const specRows = (data.specs || ['Rating', 'Reviews', 'Prime']).map(spec => {
+  const specRows = (data.specs || ['Rating', 'Reviews', 'Prime']).map((spec, idx) => {
     return `
-      <tr style="background:${data.specs.indexOf(spec) % 2 === 0 ? '#f8fafc' : '#fff'};">
+      <tr style="background:${idx % 2 === 0 ? '#f8fafc' : '#fff'};">
         ${tableProducts.map(p => {
           let value = p.specs?.[spec] || '';
           if (spec.toLowerCase() === 'rating') value = `${p.rating}/5 ★`;
@@ -2707,37 +2681,6 @@ export const extractASIN = (input: string): string | null => {
 };
 
 // ============================================================================
-// PROXY STATS (FOR DEBUGGING)
-// ============================================================================
-
-/**
- * Get proxy performance statistics
- */
-export const getProxyStats = (): Record<string, { latency: number; failures: number; successes: number }> => {
-  const stats: Record<string, { latency: number; failures: number; successes: number }> = {};
-
-  for (const proxy of CORS_PROXIES) {
-    stats[proxy.name] = {
-      latency: proxyLatencyMap.get(proxy.name) ?? -1,
-      failures: proxyFailureCount.get(proxy.name) ?? 0,
-      successes: proxySuccessCount.get(proxy.name) ?? 0,
-    };
-  }
-
-  return stats;
-};
-
-/**
- * Reset all proxy statistics
- */
-export const resetProxyStats = (): void => {
-  proxyLatencyMap.clear();
-  proxyFailureCount.clear();
-  proxySuccessCount.clear();
-  console.log('[Proxy] Stats reset');
-};
-
-// ============================================================================
 // PRE-EXTRACT AMAZON PRODUCTS (FROM HTML)
 // ============================================================================
 
@@ -2781,6 +2724,37 @@ export const preExtractAmazonProducts = (html: string): { asin: string; context:
   }
 
   return products;
+};
+
+// ============================================================================
+// PROXY STATS (FOR DEBUGGING)
+// ============================================================================
+
+/**
+ * Get proxy performance statistics
+ */
+export const getProxyStats = (): Record<string, { latency: number; failures: number; successes: number }> => {
+  const stats: Record<string, { latency: number; failures: number; successes: number }> = {};
+
+  for (const proxy of CORS_PROXIES) {
+    stats[proxy.name] = {
+      latency: proxyLatencyMap.get(proxy.name) ?? -1,
+      failures: proxyFailureCount.get(proxy.name) ?? 0,
+      successes: proxySuccessCount.get(proxy.name) ?? 0,
+    };
+  }
+
+  return stats;
+};
+
+/**
+ * Reset all proxy statistics
+ */
+export const resetProxyStats = (): void => {
+  proxyLatencyMap.clear();
+  proxyFailureCount.clear();
+  proxySuccessCount.clear();
+  console.log('[Proxy] Stats reset');
 };
 
 // ============================================================================
