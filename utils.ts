@@ -2758,34 +2758,57 @@ export const resetProxyStats = (): void => {
 };
 
 // ============================================================================
-// EXPORTS
+// EXPORTS - Named exports (for tree-shaking and direct imports)
 // ============================================================================
 
-// Make sure all functions are exported individually first
-export {
+// These are already exported with 'export const' throughout the file:
+// - SecureStorage
+// - IntelligenceCache
+// - fetchWithSmartProxy
+// - etc.
+
+// If you need a default export for backward compatibility:
+const utilsExports = {
+  // Storage & Cache
   SecureStorage,
   IntelligenceCache,
+
+  // Proxy & Fetch
   fetchWithSmartProxy,
   getProxyStats,
   resetProxyStats,
+
+  // Sitemap
   fetchAndParseSitemap,
   normalizeSitemapUrl,
   parseSitemapXml,
+
+  // Content
   fetchPageContent,
   fetchRawPostContent,
   splitContentIntoBlocks,
   preExtractAmazonProducts,
+
+  // WordPress
   pushToWordPress,
   testConnection,
+
+  // AI
   callAIProvider,
   analyzeContentAndFindProduct,
+
+  // Amazon
   searchAmazonProduct,
   fetchProductByASIN,
   extractASIN,
+
+  // HTML Generation
   generateProductBoxHtml,
   generateComparisonTableHtml,
   generateProductSchema,
   generateFaqSchema,
+
+  // Utilities
   calculatePostPriority,
   runConcurrent,
   debounce,
@@ -2793,3 +2816,5 @@ export {
   validateManualUrl,
   createBlogPostFromUrl,
 };
+
+export default utilsExports;
