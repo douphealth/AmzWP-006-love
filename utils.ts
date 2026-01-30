@@ -316,130 +316,102 @@ export const createBlogPostFromUrl = (url: string, index: number): BlogPost => {
   };
 };
 
-export const fetchAndParseSitemap = async (inputUrl: string, config: AppConfig): Promise<BlogPost[]> => {
-  console.log('[Sitemap] Starting for:', inputUrl);
+export const fetchAndParseSitemap = async (
+  inputUrl: string,
+  config: AppConfig
+): Promise<BlogPost[]> => {
+  console.log('[Sitemap] ===== STARTING SCAN =====');
+  console.log('[Sitemap] Input URL:', inputUrl);
 
   const sitemapUrls = normalizeSitemapUrl(inputUrl);
+  console.log('[Sitemap] Will try these URLs:', sitemapUrls);
+
   const allPosts: BlogPost[] = [];
   const seenUrls = new Set<string>();
-  let foundValid = false;
+  let foundValidSitemap = false;
   let lastError = '';
 
   for (const sitemapUrl of sitemapUrls) {
-    if (foundValid) break;
+    if (foundValidSitemap && allPosts.length > 0) break;
 
     try {
       console.log(`[Sitemap] Trying: ${sitemapUrl}`);
+      
       const xml = await fetchWithSmartProxy(sitemapUrl, { timeout: 25000 });
+      
+      console.log(`[Sitemap] Got response, length: ${xml.length}`);
+      
+      if (!xml || xml.length < 100) {
+        console.log('[Sitemap] Response too short, skipping');
+        continue;
+      }
 
-      if (!xml.includes('<') || (!xml.includes('url') && !xml.includes('sitemap') && !xml.includes('loc'))) {
+      if (!xml.includes('<') || !xml.includes('loc')) {
+        console.log('[Sitemap] Response does not look like XML sitemap');
         continue;
       }
 
       const urls = parseSitemapXml(xml);
-      console.log(`[Sitemap] Found ${urls.length} URLs`);
+      console.log(`[Sitemap] Parsed ${urls.length} URLs from ${sitemapUrl}`);
 
       if (urls.length === 0) continue;
 
       const isIndex = urls.every(u => u.includes('sitemap') || u.endsWith('.xml'));
 
-      if (isIndex && urls.length < 50) {
-        for (const subUrl of urls.slice(0, 10)) {
+      if (isIndex && urls.length < 100) {
+        console.log('[Sitemap] Detected sitemap index, fetching sub-sitemaps...');
+        
+        for (const subSitemapUrl of urls.slice(0, 15)) {
           try {
             await new Promise(r => setTimeout(r, 300));
-            const subXml = await fetchWithSmartProxy(subUrl, { timeout: 20000 });
+            console.log(`[Sitemap] Fetching sub-sitemap: ${subSitemapUrl}`);
+            const subXml = await fetchWithSmartProxy(subSitemapUrl, { timeout: 20000 });
             const subUrls = parseSitemapXml(subXml);
+            console.log(`[Sitemap] Sub-sitemap has ${subUrls.length} URLs`);
+
             for (const pageUrl of subUrls) {
-              const normalized = pageUrl.toLowerCase();
-              if (!seenUrls.has(normalized)) {
-                seenUrls.add(normalized);
+              const normalizedUrl = pageUrl.toLowerCase();
+              if (!seenUrls.has(normalizedUrl)) {
+                seenUrls.add(normalizedUrl);
                 allPosts.push(createBlogPostFromUrl(pageUrl, allPosts.length));
               }
             }
-          } catch {}
+          } catch (subError: any) {
+            console.warn(`[Sitemap] Sub-sitemap failed: ${subSitemapUrl} - ${subError.message}`);
+          }
         }
-        foundValid = allPosts.length > 0;
+        foundValidSitemap = allPosts.length > 0;
       } else {
         for (const pageUrl of urls) {
-          const normalized = pageUrl.toLowerCase();
-          if (!seenUrls.has(normalized)) {
-            seenUrls.add(normalized);
+          const normalizedUrl = pageUrl.toLowerCase();
+          if (!seenUrls.has(normalizedUrl)) {
+            seenUrls.add(normalizedUrl);
             allPosts.push(createBlogPostFromUrl(pageUrl, allPosts.length));
           }
         }
-        foundValid = true;
+        foundValidSitemap = true;
       }
 
     } catch (error: any) {
       lastError = error.message;
-      console.warn(`[Sitemap] Failed: ${sitemapUrl}`);
+      console.warn(`[Sitemap] Failed: ${sitemapUrl} - ${error.message}`);
+      continue;
     }
   }
 
+  console.log('[Sitemap] ===== SCAN COMPLETE =====');
+  console.log(`[Sitemap] Total posts found: ${allPosts.length}`);
+
   if (allPosts.length === 0) {
-    throw new Error(`No sitemap found. Tried ${sitemapUrls.length} URLs. Error: ${lastError}. Use "WP API" or "Add URL Manually".`);
+    throw new Error(
+      `No sitemap found for "${inputUrl}". ` +
+      `Tried ${sitemapUrls.length} URLs. ` +
+      `Last error: ${lastError || 'Unknown'}. ` +
+      `Try "WP API" button or "Add URL Manually" instead.`
+    );
   }
 
-  console.log(`[Sitemap] SUCCESS: ${allPosts.length} posts`);
   return allPosts;
-};
-
-export const fetchPostsFromWordPressAPI = async (config: AppConfig): Promise<BlogPost[]> => {
-  if (!config.wpUrl || !config.wpUser || !config.wpAppPassword) {
-    throw new Error('WordPress credentials not configured');
-  }
-
-  const apiBase = config.wpUrl.replace(/\/$/, '') + '/wp-json/wp/v2';
-  const auth = btoa(`${config.wpUser}:${config.wpAppPassword}`);
-  const posts: BlogPost[] = [];
-
-  const response = await fetchWithTimeout(`${apiBase}/posts?per_page=100&status=publish`, 15000, {
-    headers: { 'Authorization': `Basic ${auth}` },
-  });
-
-  if (!response.ok) throw new Error(`WordPress API error: ${response.status}`);
-
-  const wpPosts = await response.json();
-  for (const p of wpPosts) {
-    posts.push({
-      id: p.id,
-      title: p.title?.rendered?.replace(/<[^>]+>/g, '') || 'Untitled',
-      url: p.link,
-      postType: 'post',
-      priority: 'medium',
-      monetizationStatus: 'opportunity',
-    });
-  }
-
-  if (posts.length === 0) throw new Error('No posts found');
-  return posts;
-};
-
-export const validateManualUrl = (input: string): { isValid: boolean; normalizedUrl: string; error?: string } => {
-  const trimmed = input.trim();
-  if (!trimmed) return { isValid: false, normalizedUrl: '', error: 'URL cannot be empty' };
-  let url = trimmed;
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = 'https://' + url;
-  }
-  try {
-    new URL(url);
-    return { isValid: true, normalizedUrl: url };
-  } catch {
-    return { isValid: false, normalizedUrl: '', error: 'Invalid URL format' };
-  }
-};
-
-export const getProxyStats = (): Record<string, any> => {
-  const stats: Record<string, any> = {};
-  for (const proxy of CORS_PROXIES) {
-    stats[proxy.name] = {
-      latency: proxyLatencyMap.get(proxy.name) ?? 'N/A',
-      failures: proxyFailureCount.get(proxy.name) ?? 0,
-      successes: proxySuccessCount.get(proxy.name) ?? 0,
-    };
-  }
-  return stats;
 };
 
 export const resetProxyStats = (): void => {
