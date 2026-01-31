@@ -2051,17 +2051,23 @@ export const splitContentIntoBlocks = (html: string): string[] => {
   const blocks: string[] = [];
   let currentBlock = '';
 
-  // Simple tokenization approach
-  const regex = /(<\/?(p|h[1-6]|div|section|article|blockquote|ul|ol|table|figure|pre)[^>]*>)/gi;
+  // Simple tokenization approach - use NON-CAPTURING group (?:) for tag names
+  // to prevent tag names from being included in split results
+  const regex = /(<\/?(?:p|h[1-6]|div|section|article|blockquote|ul|ol|table|figure|pre)[^>]*>)/gi;
   const parts = html.split(regex);
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
-    
+
     if (!part) continue;
 
+    // Skip bare tag names that may have leaked through (safety check)
+    if (/^(p|h[1-6]|div|section|article|blockquote|ul|ol|table|figure|pre)$/i.test(part.trim())) {
+      continue;
+    }
+
     // Check if this is an end tag
-    const isEndTag = blockEndTags.some(tag => 
+    const isEndTag = blockEndTags.some(tag =>
       part.toLowerCase() === tag.toLowerCase()
     );
 
