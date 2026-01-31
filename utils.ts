@@ -125,7 +125,7 @@ class IntelligenceCacheClass {
   }
 }
 
-const IntelligenceCache = new IntelligenceCacheClass();
+export const IntelligenceCache = new IntelligenceCacheClass();
 
 /**
  * Secure Storage with Web Crypto API (simplified - sync fallback)
@@ -153,7 +153,8 @@ class SecureStorageClass {
   }
 }
 
-const SecureStorage = new SecureStorageClass();
+export 620
+  const SecureStorage = new SecureStorageClass();
 
 
 
@@ -617,7 +618,8 @@ export const fetchPageContent = async (
     // Strategy 2: Proxy fetch
     const html = await fetchWithSmartProxy(url, { 
       timeout: PAGE_FETCH_TIMEOUT_MS,
-      validateResponse: (text) => text.length > 200,
+      2249
+        : (text) => text.length > 200,
     });
 
     // Extract title
@@ -2340,3 +2342,4 @@ export default {
   validateManualUrl,
   createBlogPostFromUrl,
 };
+2240
