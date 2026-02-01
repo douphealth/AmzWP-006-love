@@ -92,6 +92,18 @@ Deno.serve(async (req: Request) => {
       console.log(`[SerpAPI Proxy] Has product_result:`, !!data.product_result);
       if (data.product_results) {
         console.log(`[SerpAPI Proxy] Product title:`, data.product_results.title?.substring(0, 50));
+        console.log(`[SerpAPI Proxy] Image fields available:`, {
+          main_image: typeof data.product_results.main_image,
+          images: Array.isArray(data.product_results.images) ? data.product_results.images.length : 'none',
+          thumbnail: !!data.product_results.thumbnail,
+          image: !!data.product_results.image
+        });
+        if (data.product_results.main_image) {
+          console.log(`[SerpAPI Proxy] main_image content:`, typeof data.product_results.main_image === 'string' ? data.product_results.main_image.substring(0, 100) : Object.keys(data.product_results.main_image));
+        }
+        if (data.product_results.images?.[0]) {
+          console.log(`[SerpAPI Proxy] First image:`, typeof data.product_results.images[0] === 'string' ? data.product_results.images[0].substring(0, 100) : Object.keys(data.product_results.images[0]));
+        }
       }
     } else {
       console.log(`[SerpAPI Proxy] Success - got ${data.organic_results?.length || 0} results`);

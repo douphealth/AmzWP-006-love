@@ -1980,18 +1980,23 @@ export const searchAmazonProduct = async (
       price = result.price;
     }
 
+    let imageUrl = result.thumbnail || result.image || result.primary_image || '';
+    if (!imageUrl && result.images?.[0]) {
+      imageUrl = typeof result.images[0] === 'string' ? result.images[0] : (result.images[0]?.link || result.images[0]?.url || '');
+    }
+
     const product: Partial<ProductDetails> = {
       asin: result.asin || '',
       title: result.title || query,
       price: price,
-      imageUrl: result.thumbnail || result.image || result.primary_image || '',
+      imageUrl: imageUrl,
       rating: parseFloat(result.rating) || 4.5,
       reviewCount: parseInt(String(result.reviews || result.reviews_total || '0').replace(/[^0-9]/g, '')) || 0,
       prime: result.is_prime || result.prime || false,
       brand: result.brand || '',
     };
 
-    console.log('[SerpAPI] Parsed product:', product.title?.substring(0, 40), 'ASIN:', product.asin, 'Price:', product.price);
+    console.log('[SerpAPI] Parsed product:', product.title?.substring(0, 40), 'ASIN:', product.asin, 'Price:', product.price, 'Image:', !!product.imageUrl);
 
     IntelligenceCache.set(cacheKey, product, CACHE_TTL_MS);
     return product;
@@ -2074,20 +2079,49 @@ export const fetchProductByASIN = async (
     }
 
     let imageUrl = '';
+
+    // Try multiple image sources in priority order
     if (result.main_image?.link) {
       imageUrl = result.main_image.link;
-    } else if (typeof result.main_image === 'string') {
+      console.log('[SerpAPI] Using main_image.link');
+    } else if (typeof result.main_image === 'string' && result.main_image.startsWith('http')) {
       imageUrl = result.main_image;
-    } else if (result.images && result.images.length > 0) {
+      console.log('[SerpAPI] Using main_image as string');
+    } else if (result.images && Array.isArray(result.images) && result.images.length > 0) {
       const firstImg = result.images[0];
-      imageUrl = typeof firstImg === 'string' ? firstImg : (firstImg?.link || firstImg?.url || '');
-    } else if (result.thumbnail) {
+      if (typeof firstImg === 'string') {
+        imageUrl = firstImg;
+        console.log('[SerpAPI] Using images[0] as string');
+      } else if (firstImg?.link) {
+        imageUrl = firstImg.link;
+        console.log('[SerpAPI] Using images[0].link');
+      } else if (firstImg?.url) {
+        imageUrl = firstImg.url;
+        console.log('[SerpAPI] Using images[0].url');
+      } else if (firstImg?.large || firstImg?.medium || firstImg?.small) {
+        imageUrl = firstImg.large || firstImg.medium || firstImg.small;
+        console.log('[SerpAPI] Using images[0] size variant');
+      }
+    } else if (result.thumbnail && result.thumbnail.startsWith('http')) {
       imageUrl = result.thumbnail;
-    } else if (result.image) {
+      console.log('[SerpAPI] Using thumbnail');
+    } else if (result.image && result.image.startsWith('http')) {
       imageUrl = result.image;
+      console.log('[SerpAPI] Using image field');
+    } else if (result.media?.images?.[0]) {
+      const mediaImg = result.media.images[0];
+      imageUrl = typeof mediaImg === 'string' ? mediaImg : (mediaImg?.link || mediaImg?.url || '');
+      console.log('[SerpAPI] Using media.images[0]');
     }
 
-    console.log('[SerpAPI] Image extraction - main_image:', result.main_image, 'images:', result.images?.length, 'thumbnail:', result.thumbnail, 'Final:', imageUrl);
+    console.log('[SerpAPI] Image extraction result - Final URL:', imageUrl);
+    console.log('[SerpAPI] Available image fields:', {
+      main_image: !!result.main_image,
+      images_length: result.images?.length || 0,
+      thumbnail: !!result.thumbnail,
+      image: !!result.image,
+      media_images: result.media?.images?.length || 0
+    });
 
     const product: ProductDetails = {
       id: `prod-${asin}-${Date.now()}`,
