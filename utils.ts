@@ -219,6 +219,41 @@ const API_TIMEOUT_MS = 30000;
 // Version for cache invalidation
 const CACHE_VERSION = 'v6';
 
+const upgradeAmazonImageToHighRes = (imageUrl: string): string => {
+  if (!imageUrl || typeof imageUrl !== 'string') return '';
+
+  const amazonImagePatterns = [
+    /\._[A-Z]{2}_[A-Z]{2}\d+_\./i,
+    /\._[A-Z]{2}_[A-Z]+\d+[A-Z]*_\./i,
+    /\._[A-Z]{2}\d+_\./i,
+    /\._S[LXYZ]\d+_\./i,
+    /\._U[SXYZ]\d+_\./i,
+    /\._[A-Z]+\d+[A-Z]*_\./i,
+  ];
+
+  let upgradedUrl = imageUrl;
+
+  for (const pattern of amazonImagePatterns) {
+    if (pattern.test(upgradedUrl)) {
+      upgradedUrl = upgradedUrl.replace(pattern, '._AC_SL1500_.');
+      break;
+    }
+  }
+
+  if (upgradedUrl === imageUrl && imageUrl.includes('m.media-amazon.com')) {
+    const lastDotIndex = imageUrl.lastIndexOf('.');
+    const secondLastDotIndex = imageUrl.lastIndexOf('.', lastDotIndex - 1);
+    if (secondLastDotIndex > 0) {
+      const beforeModifier = imageUrl.substring(0, secondLastDotIndex);
+      const extension = imageUrl.substring(lastDotIndex);
+      upgradedUrl = `${beforeModifier}._AC_SL1500_${extension}`;
+    }
+  }
+
+  console.log('[ImageUpgrade] Original:', imageUrl.substring(0, 80), '-> High-res:', upgradedUrl.substring(0, 80));
+  return upgradedUrl;
+};
+
 // ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
@@ -1985,11 +2020,13 @@ export const searchAmazonProduct = async (
       imageUrl = typeof result.images[0] === 'string' ? result.images[0] : (result.images[0]?.link || result.images[0]?.url || '');
     }
 
+    const highResImageUrl = upgradeAmazonImageToHighRes(imageUrl);
+
     const product: Partial<ProductDetails> = {
       asin: result.asin || '',
       title: result.title || query,
       price: price,
-      imageUrl: imageUrl,
+      imageUrl: highResImageUrl,
       rating: parseFloat(result.rating) || 4.5,
       reviewCount: parseInt(String(result.reviews || result.reviews_total || '0').replace(/[^0-9]/g, '')) || 0,
       prime: result.is_prime || result.prime || false,
@@ -2062,20 +2099,38 @@ export const fetchProductByASIN = async (
 
     console.log('[SerpAPI] Found product:', result.title?.substring(0, 50));
     console.log('[SerpAPI] Product result keys:', Object.keys(result));
+    console.log('[SerpAPI] Price fields:', {
+      price: result.price,
+      buybox_winner: result.buybox_winner?.price,
+      pricing: result.pricing,
+      price_string: result.price_string
+    });
 
     let price = '$XX.XX';
-    if (result.price?.raw) {
-      price = result.price.raw;
-    } else if (result.price?.current) {
-      price = result.price.current;
-    } else if (result.price?.value) {
-      price = `$${result.price.value}`;
-    } else if (result.buybox_winner?.price?.raw) {
+    if (result.buybox_winner?.price?.raw) {
       price = result.buybox_winner.price.raw;
+      console.log('[SerpAPI] Using buybox_winner.price.raw:', price);
     } else if (result.buybox_winner?.price?.value) {
       price = `$${result.buybox_winner.price.value}`;
-    } else if (typeof result.price === 'string') {
+      console.log('[SerpAPI] Using buybox_winner.price.value:', price);
+    } else if (result.price?.raw) {
+      price = result.price.raw;
+      console.log('[SerpAPI] Using price.raw:', price);
+    } else if (result.price?.current) {
+      price = result.price.current;
+      console.log('[SerpAPI] Using price.current:', price);
+    } else if (result.price?.value) {
+      price = `$${result.price.value}`;
+      console.log('[SerpAPI] Using price.value:', price);
+    } else if (typeof result.price === 'string' && result.price.includes('$')) {
       price = result.price;
+      console.log('[SerpAPI] Using price as string:', price);
+    } else if (result.pricing?.[0]?.price?.raw) {
+      price = result.pricing[0].price.raw;
+      console.log('[SerpAPI] Using pricing[0].price.raw:', price);
+    } else if (result.price_string) {
+      price = result.price_string;
+      console.log('[SerpAPI] Using price_string:', price);
     }
 
     let imageUrl = '';
@@ -2114,7 +2169,7 @@ export const fetchProductByASIN = async (
       console.log('[SerpAPI] Using media.images[0]');
     }
 
-    console.log('[SerpAPI] Image extraction result - Final URL:', imageUrl);
+    console.log('[SerpAPI] Image extraction result - Raw URL:', imageUrl);
     console.log('[SerpAPI] Available image fields:', {
       main_image: !!result.main_image,
       images_length: result.images?.length || 0,
@@ -2123,12 +2178,14 @@ export const fetchProductByASIN = async (
       media_images: result.media?.images?.length || 0
     });
 
+    const highResImageUrl = upgradeAmazonImageToHighRes(imageUrl);
+
     const product: ProductDetails = {
       id: `prod-${asin}-${Date.now()}`,
       asin,
       title: result.title || 'Unknown Product',
       price: price,
-      imageUrl: imageUrl,
+      imageUrl: highResImageUrl,
       rating: parseFloat(result.rating) || 4.5,
       reviewCount: parseInt(String(result.reviews_total || result.ratings_total || '0').replace(/[^0-9]/g, '')) || 0,
       prime: result.is_prime || result.buybox_winner?.is_prime || false,
