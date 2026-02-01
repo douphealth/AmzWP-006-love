@@ -510,24 +510,44 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
 
     const extractASIN = (input: string): string | null => {
         const trimmed = input.trim();
+
+        // Direct ASIN (10 alphanumeric characters)
         if (/^[A-Z0-9]{10}$/i.test(trimmed)) {
             return trimmed.toUpperCase();
         }
-        const urlMatch = trimmed.match(/amazon\.com\/(?:dp|gp\/product|exec\/obidos\/ASIN)\/([A-Z0-9]{10})/i);
-        if (urlMatch) {
-            return urlMatch[1].toUpperCase();
+
+        // Standard Amazon product URLs: /dp/ASIN, /gp/product/ASIN, /ASIN/ASIN
+        const patterns = [
+            /amazon\.[a-z.]+\/(?:dp|gp\/product|gp\/aw\/d|exec\/obidos\/ASIN)\/([A-Z0-9]{10})/i,
+            /\/dp\/([A-Z0-9]{10})/i,
+            /\/product\/([A-Z0-9]{10})/i,
+            /[?&]ASIN=([A-Z0-9]{10})/i,
+            /\/([A-Z0-9]{10})(?:\/|\?|$)/i,
+        ];
+
+        for (const pattern of patterns) {
+            const match = trimmed.match(pattern);
+            if (match && match[1]) {
+                const potentialAsin = match[1].toUpperCase();
+                // Validate it looks like an ASIN (starts with B0 for most products)
+                if (/^[A-Z0-9]{10}$/.test(potentialAsin)) {
+                    return potentialAsin;
+                }
+            }
         }
-        const dpMatch = trimmed.match(/\/dp\/([A-Z0-9]{10})/i);
-        if (dpMatch) {
-            return dpMatch[1].toUpperCase();
-        }
+
         return null;
     };
 
     const handleAddManualProduct = async () => {
         const asin = extractASIN(manualAsin);
         if (!asin) {
-            toast("Invalid ASIN or Amazon URL");
+            toast("Invalid ASIN or Amazon URL. Enter a 10-character ASIN or full Amazon product URL.");
+            return;
+        }
+
+        if (!config.serpApiKey) {
+            toast("SerpAPI key required. Configure it in Settings.");
             return;
         }
 
@@ -540,16 +560,23 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
 
         setAddingProduct(true);
         try {
-            const product = await fetchProductByASIN(asin, config.serpApiKey || '');
-            if (product) {
+            const product = await fetchProductByASIN(asin, config.serpApiKey);
+            if (product && product.asin) {
                 setProductMap(prev => ({ ...prev, [product.id]: product }));
-                toast(`Added: ${product.title.substring(0, 30)}...`);
+                toast(`Added: ${product.title.substring(0, 40)}...`);
                 setManualAsin('');
             } else {
-                toast("Failed to fetch product");
+                toast("Product not found on Amazon. Check the ASIN and try again.");
             }
-        } catch (e) {
-            toast("Error adding product");
+        } catch (e: any) {
+            const errorMsg = e?.message || 'Unknown error';
+            if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
+                toast("Request timed out. Try again.");
+            } else if (errorMsg.includes('API') || errorMsg.includes('api')) {
+                toast("API error. Check your SerpAPI key.");
+            } else {
+                toast(`Error: ${errorMsg.substring(0, 50)}`);
+            }
         } finally {
             setAddingProduct(false);
         }
