@@ -2005,12 +2005,12 @@ export const fetchProductByASIN = async (
 
   if (!cleanKey || !asin) {
     console.warn('[fetchProductByASIN] Missing API key or ASIN');
-    return null;
+    throw new Error('Missing API key or ASIN');
   }
 
   if (!/^[A-Z0-9]{10}$/i.test(asin)) {
     console.warn('[fetchProductByASIN] Invalid ASIN format:', asin);
-    return null;
+    throw new Error('Invalid ASIN format');
   }
 
   const cached = IntelligenceCache.getProduct(asin);
@@ -2028,27 +2028,40 @@ export const fetchProductByASIN = async (
       apiKey: cleanKey,
     });
 
-    const result = data.product_results;
+    console.log('[fetchProductByASIN] Raw response keys:', Object.keys(data));
+
+    const result = data.product_results || data.product_result;
 
     if (!result) {
-      console.warn('[fetchProductByASIN] No product found for ASIN:', asin);
-      return null;
+      console.error('[fetchProductByASIN] No product_results in response. Response keys:', Object.keys(data));
+
+      // Check if there's an error in the response
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      throw new Error('Product not found or invalid ASIN');
     }
 
     console.log('[SerpAPI] Found product:', result.title?.substring(0, 50));
+    console.log('[SerpAPI] Product result keys:', Object.keys(result));
 
     let price = '$XX.XX';
     if (result.price?.raw) {
       price = result.price.raw;
     } else if (result.price?.current) {
       price = result.price.current;
+    } else if (result.price?.value) {
+      price = `$${result.price.value}`;
     } else if (result.buybox_winner?.price?.raw) {
       price = result.buybox_winner.price.raw;
     } else if (result.buybox_winner?.price?.value) {
       price = `$${result.buybox_winner.price.value}`;
+    } else if (typeof result.price === 'string') {
+      price = result.price;
     }
 
-    const imageUrl = result.main_image || result.images?.[0]?.link || result.images?.[0] || '';
+    const imageUrl = result.main_image?.link || result.main_image || result.images?.[0]?.link || result.images?.[0] || '';
 
     const product: ProductDetails = {
       id: `prod-${asin}-${Date.now()}`,
@@ -2076,7 +2089,7 @@ export const fetchProductByASIN = async (
 
   } catch (error: any) {
     console.error('[fetchProductByASIN] Error:', error.message);
-    return null;
+    throw error;
   }
 };
 

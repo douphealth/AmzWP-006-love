@@ -74,7 +74,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const data = await response.json();
-    console.log(`[SerpAPI Proxy] Success - got ${data.organic_results?.length || 0} results`);
+
+    if (type === 'product') {
+      console.log(`[SerpAPI Proxy] Product response keys:`, Object.keys(data));
+      console.log(`[SerpAPI Proxy] Has product_results:`, !!data.product_results);
+      console.log(`[SerpAPI Proxy] Has product_result:`, !!data.product_result);
+      if (data.product_results) {
+        console.log(`[SerpAPI Proxy] Product title:`, data.product_results.title?.substring(0, 50));
+      }
+    } else {
+      console.log(`[SerpAPI Proxy] Success - got ${data.organic_results?.length || 0} results`);
+    }
 
     return new Response(
       JSON.stringify(data),
