@@ -2401,18 +2401,11 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 /**
  * Get raw API key - just return it as-is
+ * NOTE: API keys are stored plain text in localStorage, NOT encrypted
  */
 const getApiKey = (key: string): string => {
   if (!key) return '';
-
-  const trimmed = key.trim();
-  const decrypted = SecureStorage.decryptSync(trimmed);
-
-  if (decrypted && decrypted.length > 10) {
-    return decrypted;
-  }
-
-  return trimmed;
+  return key.trim();
 };
 
 /**
@@ -2523,7 +2516,7 @@ export const searchAmazonProduct = async (
     return {};
   }
 
-  console.log('[SerpAPI] Using API key:', cleanKey.substring(0, 8) + '...');
+  console.log('[SerpAPI] ✓ Valid API key (length:', cleanKey.length, ', first 8 chars:', cleanKey.substring(0, 8) + ')');
 
   const cacheKey = `serp_${hashString(query.toLowerCase())}`;
   const cached = IntelligenceCache.get<Partial<ProductDetails>>(cacheKey);
@@ -2532,7 +2525,7 @@ export const searchAmazonProduct = async (
     return cached;
   }
 
-  console.log('[SerpAPI] Searching for:', query.substring(0, 50));
+  console.log('[SerpAPI] Searching for:', query);
 
   try {
     const data = await callSerpApiProxy({
