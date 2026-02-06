@@ -456,7 +456,10 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
                 throw new Error('AI provider not configured. Please configure AI settings.');
             }
 
-            const currentHtml = editorNodes.filter(n => n.type === 'HTML').map(n => n.content).join('');
+            const currentHtml = editorNodes
+                .filter(n => n.type === 'HTML')
+                .map(n => n.content || '')
+                .join('\n\n');
 
             if (!currentHtml || currentHtml.trim().length < 50) {
                 throw new Error('Insufficient content for analysis. Please ensure content is loaded.');
@@ -470,7 +473,14 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
                 setProductMap(newPMap);
                 toast(`Deep Scan Complete: ${res.detectedProducts.length} Products Found`, { style: { background: "#0ea5e9" }, duration: 3000 });
             } else {
-                toast("No products detected. Try a more product-focused article.", { duration: 4000 });
+                const contentLen = currentHtml.replace(/<[^>]+>/g, '').trim().length;
+                if (contentLen < 200) {
+                    toast("Content too short for product detection. Ensure the full article is loaded.", { duration: 5000 });
+                } else if (!config.serpApiKey) {
+                    toast("SerpAPI key required for product detection. Add it in Settings.", { duration: 5000 });
+                } else {
+                    toast("No matching Amazon products found. Try adding products manually via ASIN.", { duration: 5000 });
+                }
             }
 
             // Handle Comparison Table

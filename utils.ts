@@ -106,7 +106,9 @@ class IntelligenceCacheClass {
   }
 
   setAnalysis(hash: string, data: { products: ProductDetails[]; comparison?: ComparisonData }): void {
-    this.set(`analysis_${hash}`, data, CACHE_TTL_SHORT_MS);
+    if (data.products.length > 0) {
+      this.set(`analysis_${hash}`, data, CACHE_TTL_SHORT_MS);
+    }
   }
 
   getProduct(asin: string): ProductDetails | null {
@@ -1818,29 +1820,43 @@ export const analyzeContentAndFindProduct = async (
   // AGGRESSIVE: If we have Phase 1 products and SerpAPI, use them directly
   if (phase1Products.length > 0 && config.serpApiKey) {
     const quickProducts: ProductDetails[] = [];
+    const maxPhase1 = Math.min(phase1Products.length, 12);
 
-    for (let i = 0; i < Math.min(phase1Products.length, 10); i++) {
+    for (let i = 0; i < maxPhase1; i++) {
       const p1 = phase1Products[i];
 
       try {
         let productData: Partial<ProductDetails> = {};
 
         if (p1.asin) {
-          const result = await fetchProductByASIN(p1.asin, config.serpApiKey);
-          if (result) productData = result;
+          try {
+            const result = await fetchProductByASIN(p1.asin, config.serpApiKey);
+            if (result) productData = result;
+          } catch {
+            // ASIN lookup failed, will try search
+          }
         }
 
         if (!productData.asin) {
-          productData = await searchAmazonProduct(p1.name, config.serpApiKey);
+          try {
+            const searchName = p1.name.startsWith('ASIN:') ? p1.name : p1.name;
+            productData = await searchAmazonProduct(searchName, config.serpApiKey);
+          } catch {
+            // Search failed
+          }
         }
 
-        if (productData.asin && productData.imageUrl && productData.price && productData.price !== '$XX.XX') {
+        const hasAsin = !!productData.asin;
+        const hasImage = !!productData.imageUrl;
+        const hasValidPrice = productData.price && productData.price !== '$XX.XX';
+
+        if (hasAsin && (hasImage || hasValidPrice)) {
           quickProducts.push({
             id: `prod-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             title: productData.title || p1.name,
-            asin: productData.asin,
-            price: productData.price,
-            imageUrl: productData.imageUrl,
+            asin: productData.asin!,
+            price: productData.price || 'See Price',
+            imageUrl: productData.imageUrl || `https://images-na.ssl-images-amazon.com/images/P/${productData.asin}.01._SCLZZZZZZZ_.jpg`,
             rating: productData.rating || 4.5,
             reviewCount: productData.reviewCount || 0,
             verdict: generateDefaultVerdict(productData.title || p1.name),
@@ -1856,16 +1872,15 @@ export const analyzeContentAndFindProduct = async (
           });
         }
 
-        if (i < Math.min(phase1Products.length, 10) - 1) {
-          await sleep(150);
+        if (i < maxPhase1 - 1) {
+          await sleep(120);
         }
       } catch {
-        // Error enriching product, skip
+        // Error enriching product, continue to next
       }
     }
 
     if (quickProducts.length > 0) {
-      // Create comparison table if we have 3+ products
       let comparison: ComparisonData | undefined;
       if (quickProducts.length >= 3) {
         const productIds = quickProducts.slice(0, 10).map(p => p.id);
@@ -1914,24 +1929,19 @@ export const analyzeContentAndFindProduct = async (
     const validatedProducts = new Map<string, any>();
 
     for (const p of (parsed.products || [])) {
-      if (p.confidence < 30) {
+      if (p.confidence < 20) {
         continue;
       }
 
       const searchTerms = (p.searchQuery || p.title || '').toLowerCase();
       const searchWords = searchTerms.split(/\s+/).filter((w: string) => w.length > 2);
 
-      const foundInContent = searchWords.some((word: string) => {
-        if (word.length < 3) return false;
-        return contentLower.includes(word);
-      });
+      const significantWords = searchWords.filter((w: string) => w.length > 3);
+      const matchedWords = significantWords.filter((word: string) => contentLower.includes(word));
+      const matchRatio = significantWords.length > 0 ? matchedWords.length / significantWords.length : 0;
 
-      if (!foundInContent && searchWords.length > 0) {
-        const hasAnyMatch = searchWords.filter((w: string) => w.length > 3)
-          .some((word: string) => contentLower.includes(word));
-        if (!hasAnyMatch) {
-          continue;
-        }
+      if (significantWords.length > 0 && matchRatio < 0.2 && matchedWords.length === 0) {
+        continue;
       }
 
       const key = normalizeProductName(p.searchQuery || p.title);
@@ -1942,7 +1952,7 @@ export const analyzeContentAndFindProduct = async (
 
     for (const p1 of phase1Products) {
       const key = normalizeProductName(p1.name);
-      if (!validatedProducts.has(key) && p1.confidence >= 50) {
+      if (!validatedProducts.has(key) && p1.confidence >= 40) {
         validatedProducts.set(key, {
           id: `phase1-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
           searchQuery: p1.name,
@@ -2002,28 +2012,32 @@ export const analyzeContentAndFindProduct = async (
         const hasImage = !!productData.imageUrl;
         const hasValidPrice = productData.price && productData.price !== '$XX.XX';
 
-        if (!hasAsin || !hasImage || !hasValidPrice) {
+        if (!hasAsin) {
           continue;
         }
 
         const insertionIndex = typeof product.paragraphNumber === 'number' ? product.paragraphNumber : 0;
+        const productTitle = productData.title || product.title || product.searchQuery;
+        const fallbackImage = hasImage
+          ? productData.imageUrl!
+          : `https://images-na.ssl-images-amazon.com/images/P/${productData.asin}.01._SCLZZZZZZZ_.jpg`;
 
         products.push({
           id: product.id || `prod-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          title: productData.title || product.title || product.searchQuery,
+          title: productTitle,
           asin: productData.asin!,
-          price: productData.price!,
-          imageUrl: productData.imageUrl!,
+          price: hasValidPrice ? productData.price! : 'See Price',
+          imageUrl: fallbackImage,
           rating: productData.rating || 4.5,
           reviewCount: productData.reviewCount || 0,
-          verdict: productData.verdict || generateDefaultVerdict(product.title || product.searchQuery),
+          verdict: productData.verdict || generateDefaultVerdict(productTitle),
           evidenceClaims: productData.evidenceClaims || generateDefaultClaims(),
           brand: productData.brand || '',
           category: product.category || 'General',
           prime: productData.prime ?? true,
           insertionIndex,
           deploymentMode: 'ELITE_BENTO',
-          faqs: productData.faqs || generateDefaultFaqs(product.title || product.searchQuery),
+          faqs: productData.faqs || generateDefaultFaqs(productTitle),
           specs: productData.specs || {},
           confidence: product.confidence,
           exactMention: product.exactQuote || '',
@@ -2067,40 +2081,52 @@ export const analyzeContentAndFindProduct = async (
     if (phase1Products.length > 0 && config.serpApiKey) {
       const fallbackProducts: ProductDetails[] = [];
 
-      for (const p1 of phase1Products.slice(0, 5)) {
+      for (const p1 of phase1Products.slice(0, 8)) {
         try {
           let productData: Partial<ProductDetails> = {};
           if (p1.asin) {
-            const asinResult = await fetchProductByASIN(p1.asin, config.serpApiKey);
-            if (asinResult) {
-              productData = asinResult;
+            try {
+              const asinResult = await fetchProductByASIN(p1.asin, config.serpApiKey);
+              if (asinResult) productData = asinResult;
+            } catch {
+              // ASIN lookup failed
             }
-          } else {
-            productData = await searchAmazonProduct(p1.name, config.serpApiKey);
+          }
+          if (!productData.asin) {
+            try {
+              productData = await searchAmazonProduct(p1.name, config.serpApiKey);
+            } catch {
+              // Search failed
+            }
           }
 
-          if (productData.asin && productData.imageUrl && productData.price && productData.price !== '$XX.XX') {
+          if (productData.asin) {
+            const hasImage = !!productData.imageUrl;
+            const hasValidPrice = productData.price && productData.price !== '$XX.XX';
             fallbackProducts.push({
               id: `fallback-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
               title: productData.title || p1.name,
               asin: productData.asin,
-              price: productData.price,
-              imageUrl: productData.imageUrl,
+              price: hasValidPrice ? productData.price! : 'See Price',
+              imageUrl: hasImage ? productData.imageUrl! : `https://images-na.ssl-images-amazon.com/images/P/${productData.asin}.01._SCLZZZZZZZ_.jpg`,
               rating: productData.rating || 4.5,
               reviewCount: productData.reviewCount || 0,
-              verdict: generateDefaultVerdict(p1.name),
+              verdict: generateDefaultVerdict(productData.title || p1.name),
               evidenceClaims: generateDefaultClaims(),
               brand: productData.brand || '',
               category: 'General',
               prime: productData.prime ?? true,
               insertionIndex: 0,
               deploymentMode: 'ELITE_BENTO',
-              faqs: generateDefaultFaqs(p1.name),
+              faqs: generateDefaultFaqs(productData.title || p1.name),
               specs: {},
               confidence: p1.confidence,
             });
           }
-        } catch {}
+          await sleep(100);
+        } catch {
+          // Continue to next product
+        }
       }
 
       if (fallbackProducts.length > 0) {
@@ -2127,138 +2153,172 @@ function extractProductsPhase1(htmlContent: string, textContent: string): Phase1
   const products: Phase1Product[] = [];
   const seen = new Set<string>();
 
+  const addProduct = (name: string, sourceType: string, confidence: number, asin?: string) => {
+    const cleaned = name.trim().replace(/[\.\,\!\?\;]+$/, '');
+    if (!cleaned || cleaned.length < 4) return;
+    const key = asin || cleaned.toLowerCase().replace(/\s+/g, '_');
+    if (seen.has(key)) return;
+    seen.add(key);
+    products.push({ name: cleaned, asin, sourceType, confidence });
+  };
+
   // Pattern 1: ASIN extraction from Amazon links
   const asinPatterns = [
-    /amazon\.com\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})/gi,
+    /amazon\.[a-z.]+\/(?:dp|gp\/product|gp\/aw\/d|exec\/obidos\/ASIN)\/([A-Z0-9]{10})/gi,
     /\/dp\/([A-Z0-9]{10})/gi,
-    /\/(B0[A-Z0-9]{8})(?:[\/\?\s"']|$)/gi,
+    /\/(B0[A-Z0-9]{8})(?:[\/\?\s"'&]|$)/gi,
+    /amzn\.to\/([a-zA-Z0-9]+)/gi,
+    /tag=[^&"'\s]+/gi,
   ];
 
   for (const pattern of asinPatterns) {
     let match;
     while ((match = pattern.exec(htmlContent)) !== null) {
       const asin = match[1]?.toUpperCase();
-      if (asin && !seen.has(asin) && /^[A-Z0-9]{10}$/.test(asin)) {
-        seen.add(asin);
-        products.push({
-          name: `ASIN: ${asin}`,
-          asin,
-          sourceType: 'amazon_link',
-          confidence: 100,
-        });
+      if (asin && /^[A-Z0-9]{10}$/.test(asin)) {
+        addProduct(`ASIN: ${asin}`, 'amazon_link', 100, asin);
       }
     }
   }
 
-  // Pattern 2: Numbered list items (common in "Best X" listicles)
-  // Matches: "1. Product Name", "#1 Product Name", "1) Product Name"
-  const numberedListPattern = /(?:^|\n)\s*(?:\d+[\.\)]\s*|#\d+\s+)([A-Z][A-Za-z0-9\s\-\.]{8,60})(?:\s*[-–—:]|\n)/gm;
+  // Pattern 1b: Extract product names from Amazon affiliate link anchor text
+  const amazonLinkAnchors = /<a[^>]*href="[^"]*(?:amazon\.[a-z.]+|amzn\.to)[^"]*"[^>]*>([^<]{4,80})<\/a>/gi;
   let match;
+  while ((match = amazonLinkAnchors.exec(htmlContent)) !== null) {
+    const anchorText = match[1]?.trim().replace(/&amp;/g, '&').replace(/&#\d+;/g, '');
+    if (anchorText && anchorText.length >= 4 && !/^(click|buy|check|view|see|get|shop|here|now|more|link|price|deal)/i.test(anchorText)) {
+      addProduct(anchorText, 'amazon_anchor', 95);
+    }
+  }
+
+  // Pattern 2: Numbered list items (relaxed matching)
+  const numberedListPattern = /(?:^|\n)\s*(?:\d+[\.\)]\s*|#\d+[\s:]+)([A-Z][A-Za-z0-9\s\-\.&']{4,70})(?:\s*[-–—:\(]|\n)/gm;
   while ((match = numberedListPattern.exec(textContent)) !== null) {
     const productName = match[1]?.trim().replace(/[\.\,\!\?\;]+$/, '');
-    if (!productName) continue;
-
-    const key = productName.toLowerCase().replace(/\s+/g, '_');
-    if (seen.has(key) || productName.length < 8) continue;
-
-    // Must contain at least one number OR recognized brand/model word
+    if (!productName || productName.length < 5) continue;
     const hasNumber = /\d/.test(productName);
-    const hasBrandWord = /\b(?:Pro|Max|Plus|Ultra|Mini|Lite|Air|Band|Watch|Buds|Charge|Series|Gen|Edition)\b/i.test(productName);
-
-    if (hasNumber || hasBrandWord) {
-      seen.add(key);
-      products.push({
-        name: productName,
-        sourceType: 'numbered_list',
-        confidence: 95,
-      });
+    const hasBrandWord = /\b(?:Pro|Max|Plus|Ultra|Mini|Lite|Air|Band|Watch|Buds|Charge|Series|Gen|Edition|Smart|Wireless|Bluetooth|Premium|Classic|Sport|Active|Studio|Elite|Standard|Essential)\b/i.test(productName);
+    const hasUpperWord = /[A-Z][a-z]+\s+[A-Z]/.test(productName);
+    if (hasNumber || hasBrandWord || hasUpperWord) {
+      addProduct(productName, 'numbered_list', 95);
     }
   }
 
-  // Pattern 3: HTML headers (h2, h3) - common in comparison posts
-  const headerPattern = /<h[23][^>]*>([^<]{8,80})<\/h[23]>/gi;
+  // Pattern 3: HTML headers - strip nested tags before matching
+  const headerPattern = /<h[2-4][^>]*>([\s\S]*?)<\/h[2-4]>/gi;
   while ((match = headerPattern.exec(htmlContent)) !== null) {
-    const headerText = match[1]?.trim().replace(/^(?:\d+[\.\)]\s*|#\d+\s+)/, '');
-    if (!headerText) continue;
+    const rawHeader = match[1] || '';
+    const headerText = rawHeader
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&#\d+;/g, '')
+      .replace(/&[a-z]+;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/^(?:\d+[\.\)]\s*|#\d+\s+)/, '');
+    if (!headerText || headerText.length < 5 || headerText.length > 100) continue;
 
-    const key = headerText.toLowerCase().replace(/\s+/g, '_');
-    if (seen.has(key) || headerText.length < 8) continue;
-
-    // Must look like a product name (has brand or model indicators)
-    const looksLikeProduct = /\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Band|Watch|Tracker|Pro|Max|Plus|Ultra|Mini|Lite|\d+)|\d{3,4}[A-Za-z]*)\b/.test(headerText);
+    const looksLikeProduct =
+      /\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Band|Watch|Tracker|Pro|Max|Plus|Ultra|Mini|Lite|\d+)|\d{3,4}[A-Za-z]*)\b/.test(headerText) ||
+      /[A-Z][a-z]+\s+[A-Z][A-Za-z0-9]/.test(headerText) ||
+      /\b(?:Best|Top|Review|vs\.?)\b/i.test(headerText) && /[A-Z][a-z]{2,}/.test(headerText);
 
     if (looksLikeProduct) {
-      seen.add(key);
-      products.push({
-        name: headerText,
-        sourceType: 'header',
-        confidence: 90,
-      });
+      const cleanName = headerText
+        .replace(/\s*[-–—]\s*(Best|Top|Review|Our|The|A|An|Detailed|Full|Complete|In-Depth|Honest).*$/i, '')
+        .replace(/^\s*(Best|Top|The|Our|Why|How)\s+/i, '')
+        .trim();
+      if (cleanName.length >= 5) {
+        addProduct(cleanName, 'header', 90);
+      }
     }
   }
 
-  // Pattern 4: Comprehensive brand patterns with MORE brands
+  // Pattern 4: Products in bold/strong tags (common in listicles)
+  const boldPattern = /<(?:strong|b)[^>]*>([^<]{5,80})<\/(?:strong|b)>/gi;
+  while ((match = boldPattern.exec(htmlContent)) !== null) {
+    const boldText = match[1]?.trim().replace(/&amp;/g, '&').replace(/&#\d+;/g, '');
+    if (!boldText || boldText.length < 5) continue;
+    const looksLikeProduct = /[A-Z][a-z]+\s+[A-Z0-9]/.test(boldText) || /\d/.test(boldText);
+    const notSentence = boldText.split(/\s+/).length <= 8 && !/\b(the|this|that|these|those|what|why|how|when|where|which|our|my|your|their|its|we|you|they|he|she|it|and|but|or|so|if|in|on|at|to|for|of|with|by|from)\b/i.test(boldText.split(/\s+/)[0] || '');
+    if (looksLikeProduct && notSentence) {
+      addProduct(boldText, 'bold_mention', 80);
+    }
+  }
+
+  // Pattern 5: Comprehensive brand patterns
   const brandPatterns = [
-    /\b(Xiaomi|Huawei|Amazfit|COROS|OnePlus|Oppo|Vivo|Realme|Nothing)\s+([A-Za-z][\w\s\-\.]{3,45})(?=[\.\,\!\?\;\:\)\]\"\']|\s+(?:is|are|was|were|has|have|with|for|features|offers|comes|includes|provides|review)|\s*$)/gi,
-    /\b(Apple|Samsung|Sony|Google|Microsoft|Amazon|Nike|Adidas|Nintendo|Bose|JBL|Beats|Sennheiser|Logitech|Razer|Corsair|ASUS|Acer|Dell|HP|Lenovo|Dyson|Shark|Ninja|KitchenAid|Cuisinart|Breville|Vitamix|Instant\s*Pot|Fitbit|Garmin|Canon|Nikon|GoPro|DJI|Anker|Jabra|Philips|Braun|Oral-B|Roomba|iRobot|Eufy|Roborock|Weber|DeWalt|Makita|Milwaukee|Roku|Kindle|Echo|AirPods|PlayStation|Xbox)\s+([A-Za-z0-9][\w\s\-\.]{1,40}?)(?=[\.\,\!\?\;\:\)\]\"\']|\s+(?:is|are|was|were|has|have|with|for|features|offers|comes|includes|provides)|\s*$)/gi,
+    /\b(Xiaomi|Huawei|Amazfit|COROS|OnePlus|Oppo|Vivo|Realme|Nothing|Oura|Whoop|Theragun|Hyperice|Sonos|Bang\s*&?\s*Olufsen|Marshall|Technics|Audio-Technica|Shure|HyperX|SteelSeries|Elgato|Blue\s*Yeti|Rode|Keychron|Ducky|GMMK|Nanoleaf|Govee|Hue|Ring|Wyze|Arlo|Nest|SimpliSafe|August|Yale|Ecobee|Lutron|Sonos|Blink|TP-Link|Netgear|Ubiquiti|Synology|Anova|Thermapen|Traeger|Blackstone|Lodge|Le\s*Creuset|Staub|All-Clad|Zwilling|Wusthof|Vitamix|Blendtec|NutriBullet|Nespresso|Keurig|Breville|Fellow|Baratza|Rancilio|Gaggia|Osprey|Gregory|Deuter|Arc'teryx|Black\s*Diamond|MSR|Jetboil|BioLite|Goal\s*Zero|Jackery|EcoFlow|Bluetti|Anker|Ugreen|Belkin|Satechi|CalDigit|OWC|Twelve\s*South|Nomad|Peak\s*Design|Moment|Bellroy|Aer|Tortuga|Away|Samsonite|Rimowa|Tumi|Benchmade|Kershaw|Spyderco|Gerber|Victorinox|Cricut|Silhouette|Brother)\s+([A-Za-z0-9][\w\s\-\.&']{1,50}?)(?=[\.\,\!\?\;\:\)\]\"\'\<]|\s+(?:is|are|was|were|has|have|had|with|for|and|or|but|features|offers|comes|includes|provides|delivers|boasts|review|vs|versus|compared)|\s*$)/gi,
+    /\b(Apple|Samsung|Sony|Google|Microsoft|Amazon|Nike|Adidas|Nintendo|Bose|JBL|Beats|Sennheiser|Logitech|Razer|Corsair|ASUS|Acer|Dell|HP|Lenovo|Dyson|Shark|Ninja|KitchenAid|Cuisinart|Breville|Vitamix|Instant\s*Pot|Fitbit|Garmin|Canon|Nikon|GoPro|DJI|Anker|Jabra|Philips|Braun|Oral-B|Roomba|iRobot|Eufy|Roborock|Weber|DeWalt|Makita|Milwaukee|Roku|Kindle|Echo|AirPods|PlayStation|Xbox|LG|TCL|Hisense|Vizio|Sonos|Bose|Herman\s*Miller|Secretlab|Steelcase|Peloton|NordicTrack|Bowflex|Theragun|Oura|YETI|Hydro\s*Flask|Stanley|Osprey|Thule|REI)\s+([A-Za-z0-9][\w\s\-\.&']{1,50}?)(?=[\.\,\!\?\;\:\)\]\"\'\<]|\s+(?:is|are|was|were|has|have|had|with|for|and|or|but|features|offers|comes|includes|provides|delivers|boasts|review|vs|versus|compared)|\s*$)/gi,
   ];
 
   for (const pattern of brandPatterns) {
     let match;
     while ((match = pattern.exec(textContent)) !== null) {
       const fullMatch = match[0].trim().replace(/[\.\,\!\?\;]+$/, '');
-      const key = fullMatch.toLowerCase().replace(/\s+/g, '_');
-
-      if (seen.has(key) || fullMatch.length < 5 || fullMatch.length > 60) continue;
-      seen.add(key);
-
-      products.push({
-        name: fullMatch,
-        sourceType: 'brand_model',
-        confidence: 85,
-      });
+      if (fullMatch.length < 5 || fullMatch.length > 70) continue;
+      addProduct(fullMatch, 'brand_model', 85);
     }
   }
 
-  // Pattern 5: Standalone products (popular products that don't need brand context)
+  // Pattern 6: Standalone products
   const standaloneProducts = [
     /\b(AirPods(?:\s*(?:Pro|Max))?(?:\s*\d+)?)\b/gi,
-    /\b(Galaxy\s*(?:Buds|Watch|Tab|S\d+|Z\s*(?:Fold|Flip)|Fit)(?:\s*\d+)?(?:\s*(?:Pro|Plus|Ultra|FE))?)\b/gi,
-    /\b(Pixel\s*(?:\d+|Buds|Watch)(?:\s*(?:Pro|a))?)\b/gi,
+    /\b(Galaxy\s*(?:Buds|Watch|Tab|S\d+|Z\s*(?:Fold|Flip)|Fit|Ring)(?:\s*\d+)?(?:\s*(?:Pro|Plus|Ultra|FE))?)\b/gi,
+    /\b(Pixel\s*(?:\d+|Buds|Watch|Tablet)(?:\s*(?:Pro|a))?)\b/gi,
     /\b(iPhone\s*(?:\d+)?(?:\s*(?:Pro|Max|Plus|SE))?)\b/gi,
     /\b(iPad\s*(?:Pro|Air|Mini)?(?:\s*\d+)?)\b/gi,
     /\b(MacBook\s*(?:Air|Pro)?(?:\s*\d+)?)\b/gi,
     /\b(Apple\s*Watch(?:\s*(?:Series|SE|Ultra)\s*\d*)?)\b/gi,
-    /\b(Echo\s*(?:Dot|Show|Studio|Pop)?(?:\s*\d+)?)\b/gi,
-    /\b(Kindle\s*(?:Paperwhite|Oasis|Scribe)?)\b/gi,
-    /\b(Fire\s*(?:TV|Stick|Tablet)(?:\s*\d+)?(?:\s*(?:Lite|Max|Kids))?)\b/gi,
-    /\b(PlayStation\s*\d+)\b/gi,
-    /\b(Xbox\s*(?:Series\s*[XS]|One))\b/gi,
-    /\b(Nintendo\s*Switch(?:\s*(?:OLED|Lite))?)\b/gi,
-    /\b(Quest\s*\d+)\b/gi,
-    /\b(Instant\s*Pot(?:\s*(?:Duo|Pro|Ultra))?)\b/gi,
-    /\b(Roomba\s*[a-z]?\d+)\b/gi,
-    /\b(Fitbit\s*(?:Charge|Versa|Sense|Luxe|Inspire)\s*\d*)\b/gi,
-    /\b(Garmin\s*(?:Forerunner|Fenix|Venu|Instinct)\s*\d*(?:\s*[A-Za-z]+)?)\b/gi,
+    /\b(Echo\s*(?:Dot|Show|Studio|Pop)?(?:\s*(?:\d+|Gen\s*\d+))?)\b/gi,
+    /\b(Kindle\s*(?:Paperwhite|Oasis|Scribe|Colorsoft)?)\b/gi,
+    /\b(Fire\s*(?:TV|Stick|Tablet|HD)(?:\s*\d+)?(?:\s*(?:Lite|Max|Kids|Plus))?)\b/gi,
+    /\b(PlayStation\s*\d+(?:\s*(?:Pro|Slim|VR\d*))?)\b/gi,
+    /\b(Xbox\s*(?:Series\s*[XS]|One(?:\s*[XS])?))\b/gi,
+    /\b(Nintendo\s*Switch(?:\s*(?:OLED|Lite|2))?)\b/gi,
+    /\b(Meta\s*Quest\s*\d+(?:\s*S)?)\b/gi,
+    /\b(Quest\s*\d+(?:\s*S)?)\b/gi,
+    /\b(Instant\s*Pot(?:\s*(?:Duo|Pro|Ultra|Vortex))?)\b/gi,
+    /\b(Roomba\s*(?:[a-z]?\d+|Combo|j\d+|s\d+))\b/gi,
+    /\b(Fitbit\s*(?:Charge|Versa|Sense|Luxe|Inspire|Ace)\s*\d*)\b/gi,
+    /\b(Garmin\s*(?:Forerunner|Fenix|Venu|Instinct|Enduro|Lily|Vivomove|Vivoactive)\s*\d*(?:\s*[A-Za-z]+)?)\b/gi,
     /\b(Mi\s*(?:Band|Watch|Smart\s*Band)\s*\d+(?:\s*(?:Pro|NFC))?)\b/gi,
-    /\b(Amazfit\s*(?:Band|GTR|GTS|Bip|T-Rex|Cheetah)\s*\d*(?:\s*(?:Pro|Plus|Ultra))?)\b/gi,
+    /\b(Amazfit\s*(?:Band|GTR|GTS|Bip|T-Rex|Cheetah|Falcon|Balance)\s*\d*(?:\s*(?:Pro|Plus|Ultra))?)\b/gi,
+    /\b(Surface\s*(?:Pro|Laptop|Go|Studio|Book)\s*\d*)\b/gi,
+    /\b(ThinkPad\s*[A-Z]\d+(?:\s*(?:Gen\s*\d+|s|i))?)\b/gi,
+    /\b(Steam\s*Deck(?:\s*(?:OLED|LCD))?)\b/gi,
+    /\b(Ring\s*(?:Doorbell|Camera|Alarm|Floodlight)(?:\s*(?:Pro|Plus|Elite|\d+))?)\b/gi,
+    /\b(Nest\s*(?:Thermostat|Cam|Doorbell|Hub|Mini|Audio)(?:\s*(?:Pro|Max|\d+))?)\b/gi,
+    /\b(Dyson\s*(?:V\d+|Airwrap|Supersonic|Pure|Big\s*Quiet|Zone)(?:\s*(?:Absolute|Animal|Motorhead|Detect))?)\b/gi,
+    /\b(Sonos\s*(?:One|Beam|Arc|Sub|Move|Roam|Era|Port|Amp|Ray)\s*\d*)\b/gi,
+    /\b(Oura\s*Ring\s*(?:Gen\s*\d+|\d+)?)\b/gi,
+    /\b(YETI\s*(?:Rambler|Tundra|Roadie|Hopper|Panga)(?:\s*\d+)?)\b/gi,
   ];
 
   for (const pattern of standaloneProducts) {
     let match;
     while ((match = pattern.exec(textContent)) !== null) {
       const fullMatch = match[1]?.trim();
-      if (!fullMatch) continue;
+      if (!fullMatch || fullMatch.length < 4) continue;
+      addProduct(fullMatch, 'standalone', 92);
+    }
+  }
 
-      const key = fullMatch.toLowerCase().replace(/\s+/g, '_');
-      if (seen.has(key) || fullMatch.length < 4) continue;
-      seen.add(key);
+  // Pattern 7: Generic product patterns with model numbers
+  const modelNumberPattern = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+((?:[A-Z]{1,3}[-]?\d{2,5}[A-Za-z]*|\d{3,5}[A-Za-z]+)(?:\s*(?:Pro|Max|Plus|Ultra|Mini|SE|Gen\s*\d+))?)\b/g;
+  while ((match = modelNumberPattern.exec(textContent)) !== null) {
+    const fullMatch = match[0].trim();
+    if (fullMatch.length >= 5 && fullMatch.length <= 60) {
+      addProduct(fullMatch, 'model_number', 82);
+    }
+  }
 
-      products.push({
-        name: fullMatch,
-        sourceType: 'standalone',
-        confidence: 90,
-      });
+  // Pattern 8: Products in affiliate-style link text (non-Amazon)
+  const affiliateLinkPattern = /<a[^>]*href="[^"]*(?:shareasale|commission|awin|partnerize|impact|affiliate|ref=|tag=)[^"]*"[^>]*>([^<]{5,80})<\/a>/gi;
+  while ((match = affiliateLinkPattern.exec(htmlContent)) !== null) {
+    const linkText = match[1]?.trim().replace(/&amp;/g, '&');
+    if (linkText && linkText.length >= 5 && /[A-Z]/.test(linkText)) {
+      addProduct(linkText, 'affiliate_link', 88);
     }
   }
 

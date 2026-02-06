@@ -59,28 +59,28 @@ export async function detectProductsAggressively(
         }
       }
 
-      // Validate product data
       const hasAsin = !!productData.asin;
       const hasImage = !!productData.imageUrl;
       const hasPrice = productData.price && productData.price !== '$XX.XX';
 
-      if (hasAsin && hasImage && hasPrice) {
+      if (hasAsin) {
+        const productTitle = productData.title || p1.name;
         products.push({
           id: `prod-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          title: productData.title || p1.name,
+          title: productTitle,
           asin: productData.asin || '',
-          price: productData.price || '$XX.XX',
-          imageUrl: productData.imageUrl || '',
+          price: hasPrice ? productData.price! : 'See Price',
+          imageUrl: hasImage ? productData.imageUrl! : `https://images-na.ssl-images-amazon.com/images/P/${productData.asin}.01._SCLZZZZZZZ_.jpg`,
           rating: productData.rating || 4.5,
           reviewCount: productData.reviewCount || 0,
-          verdict: generateDefaultVerdict(productData.title || p1.name),
+          verdict: generateDefaultVerdict(productTitle),
           evidenceClaims: generateDefaultClaims(),
           brand: productData.brand || '',
           category: 'General',
           prime: productData.prime ?? true,
           insertionIndex: 0,
           deploymentMode: 'ELITE_BENTO' as DeploymentMode,
-          faqs: generateDefaultFaqs(productData.title || p1.name),
+          faqs: generateDefaultFaqs(productTitle),
           specs: {},
           confidence: p1.confidence,
         });
