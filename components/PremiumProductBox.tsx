@@ -98,7 +98,7 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                     : 'translate(0, 0) scale(1) rotate(0deg)',
                 }}
                 onError={(e) => {
-                  console.warn('[PremiumProductBox] Image failed to load:', product.imageUrl);
+                  void 0;
                   e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dominant-baseline="middle" fill="%23666" font-family="Arial" font-size="16"%3ENo Image%3C/text%3E%3C/svg%3E';
                 }}
               />

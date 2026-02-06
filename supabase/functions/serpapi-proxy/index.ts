@@ -50,8 +50,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    console.log(`[SerpAPI Proxy] ${type} request for:`, query || asin);
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 25000);
 
@@ -63,9 +61,7 @@ Deno.serve(async (req: Request) => {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[SerpAPI Proxy] API error: ${response.status}`, errorText.substring(0, 200));
-
+      await response.text();
       let errorMessage = `SerpAPI returned ${response.status}`;
       if (response.status === 401) errorMessage = 'Invalid SerpAPI key';
       else if (response.status === 429) errorMessage = 'SerpAPI rate limit exceeded';
@@ -82,21 +78,6 @@ Deno.serve(async (req: Request) => {
 
     const data = await response.json();
 
-    if (type === 'product') {
-      const pr = data.product_results || data.product_result;
-      if (pr) {
-        console.log(`[SerpAPI Proxy] Product: "${pr.title?.substring(0, 50)}"`);
-        console.log(`[SerpAPI Proxy] Image: ${pr.main_image ? 'YES' : 'NO'}, Images: ${pr.images?.length || 0}`);
-        console.log(`[SerpAPI Proxy] Price: ${pr.buybox_winner?.price?.raw || pr.price?.raw || 'N/A'}`);
-        console.log(`[SerpAPI Proxy] Rating: ${pr.rating || 'N/A'}, Reviews: ${pr.reviews_total || pr.ratings_total || 'N/A'}`);
-        console.log(`[SerpAPI Proxy] Bullets: ${pr.feature_bullets?.length || 0}, Specs: ${Object.keys(pr.specifications_flat || {}).length}`);
-      } else {
-        console.error(`[SerpAPI Proxy] No product data found. Keys: ${Object.keys(data).join(', ')}`);
-      }
-    } else {
-      console.log(`[SerpAPI Proxy] Search: ${data.organic_results?.length || 0} results`);
-    }
-
     return new Response(
       JSON.stringify(data),
       {
@@ -106,7 +87,6 @@ Deno.serve(async (req: Request) => {
     );
 
   } catch (error: any) {
-    console.error("[SerpAPI Proxy] Error:", error.message);
     const isTimeout = error.name === 'AbortError';
     return new Response(
       JSON.stringify({ error: isTimeout ? "Request timed out - try again" : (error.message || "Internal server error") }),

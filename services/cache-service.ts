@@ -1,5 +1,7 @@
 import { injectable } from 'inversify';
 
+const IS_DEV = import.meta.env.DEV;
+
 export interface ICacheService {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T, ttlMs?: number): Promise<void>;
@@ -19,7 +21,8 @@ export class LocalStorageCacheService implements ICacheService {
         return null;
       }
       return parsed.value;
-    } catch {
+    } catch (err) {
+      if (IS_DEV) console.warn('[Cache] get failed:', key, err);
       return null;
     }
   }
@@ -31,16 +34,16 @@ export class LocalStorageCacheService implements ICacheService {
         expiresAt: ttlMs ? Date.now() + ttlMs : undefined,
       };
       localStorage.setItem(key, JSON.stringify(payload));
-    } catch {
-      // ignore quota errors
+    } catch (err) {
+      if (IS_DEV) console.warn('[Cache] set failed (quota?):', key, err);
     }
   }
 
   async delete(key: string): Promise<void> {
     try {
       localStorage.removeItem(key);
-    } catch {
-      // ignore
+    } catch (err) {
+      if (IS_DEV) console.warn('[Cache] delete failed:', key, err);
     }
   }
 
@@ -49,8 +52,8 @@ export class LocalStorageCacheService implements ICacheService {
       Object.keys(localStorage)
         .filter((k) => k.startsWith('amzwp_') || k.startsWith('ai:') || k.startsWith('analysis:') || k.startsWith('wp:'))
         .forEach((k) => localStorage.removeItem(k));
-    } catch {
-      // ignore
+    } catch (err) {
+      if (IS_DEV) console.warn('[Cache] clear failed:', err);
     }
   }
 }

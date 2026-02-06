@@ -147,7 +147,7 @@ const safeDecrypt = (value: string | undefined): string => {
   try {
     return SecureStorage.decryptSync(value);
   } catch {
-    console.warn('[ConfigPanel] Decryption failed, returning empty string');
+    void 0;
     return '';
   }
 };
@@ -161,7 +161,7 @@ const safeEncrypt = (value: string | undefined): string => {
   try {
     return SecureStorage.encryptSync(value);
   } catch {
-    console.warn('[ConfigPanel] Encryption failed, returning empty string');
+    void 0;
     return '';
   }
 };

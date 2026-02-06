@@ -9,6 +9,7 @@ import { useHistory } from '../hooks/useHistory';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { toast } from 'sonner';
+import { sanitizeHtml } from '../lib/sanitize';
 
 // ============================================================================
 // AUTO-SAVE CONFIGURATION
@@ -81,14 +82,10 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
             setStatus('fetching');
 
             try {
-                console.log('[PostEditor] Starting initialization for post:', post.id);
-
                 // 1. Fetch Content
                 const result = await fetchRawPostContent(config, post.id, post.url || "");
 
                 if (!isMounted) return;
-
-                console.log('[PostEditor] Fetched content, length:', result.content?.length || 0);
 
                 if (!result.content || result.content.length < 10) {
                     throw new Error('No content received from WordPress API');
@@ -118,8 +115,6 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
 
                 // 4. Construct Editor Nodes
                 const rawBlocks = splitContentIntoBlocks(result.content || '');
-
-                console.log('[PostEditor] Split into', rawBlocks.length, 'blocks');
 
                 if (rawBlocks.length === 0) {
                     throw new Error('Failed to parse content into blocks');
@@ -153,17 +148,12 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
 
                 if (!isMounted) return;
 
-                console.log('[PostEditor] Initializing with', nodes.length, 'nodes');
-
                 // Use resetHistory to set initial state without creating undo history
                 resetHistory(nodes);
                 setStatus('idle');
-
-                console.log('[PostEditor] Initialization complete');
             } catch (e: any) {
                 if (!isMounted) return;
 
-                console.error('[PostEditor] Initialization failed:', e);
                 setStatus('error');
                 toast(`Failed to load content: ${e.message}`);
             }
@@ -191,7 +181,7 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
             localStorage.setItem(`${AUTO_SAVE_KEY_PREFIX}${post.id}`, JSON.stringify(state));
             lastSaveRef.current = Date.now();
         } catch (error) {
-            console.warn('[AutoSave] Failed to save:', error);
+
         }
     }, [editorNodes, productMap, post.id]);
     
@@ -206,7 +196,7 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
                 }
             }
         } catch (error) {
-            console.warn('[AutoSave] Failed to load:', error);
+
         }
         return null;
     }, [post.id]);
@@ -461,8 +451,6 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
         setStatus('analyzing');
 
         try {
-            console.log('[PostEditor] Starting deep scan...');
-
             // Validate AI configuration
             if (!config.aiProvider) {
                 throw new Error('AI provider not configured. Please configure AI settings.');
@@ -474,11 +462,7 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
                 throw new Error('Insufficient content for analysis. Please ensure content is loaded.');
             }
 
-            console.log('[PostEditor] Analyzing', currentHtml.length, 'characters of content');
-
             const res = await analyzeContentAndFindProduct(post.title, currentHtml, config);
-
-            console.log('[PostEditor] Analysis complete. Found', res.detectedProducts.length, 'products');
 
             if (res.detectedProducts.length > 0) {
                 const newPMap = { ...productMap };
@@ -503,7 +487,6 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
             }
 
         } catch (e: any) {
-            console.error('[PostEditor] Deep scan failed:', e);
             const errorMsg = e.message || "Unknown error";
             const displayMsg = errorMsg.length > 100 ? errorMsg.substring(0, 97) + "..." : errorMsg;
             toast(`Scan Failed: ${displayMsg}`, { duration: 6000 });
@@ -602,8 +585,6 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
             }
         } catch (e: any) {
             const errorMsg = e?.message || 'Unknown error';
-            console.error('[ManualAdd] Full error:', e);
-            console.error('[ManualAdd] Error message:', errorMsg);
             if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
                 toast("Request timed out. Try again.");
             } else if (errorMsg.includes('401') || errorMsg.includes('Invalid API')) {
@@ -639,7 +620,6 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
             toast("Production Sync Successful");
             window.open(link, '_blank');
         } catch (e: any) {
-            console.error(e);
             const msg = e.message.length > 100 ? e.message.substring(0, 97) + "..." : e.message;
             toast(msg, { duration: 5000 });
         } finally { setStatus('idle'); }
@@ -835,7 +815,7 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
                                                     contentEditable
                                                     suppressContentEditableWarning
                                                     onBlur={(e) => updateHtmlNode(node.id, e.currentTarget.innerHTML)}
-                                                    dangerouslySetInnerHTML={{ __html: node.content || '' }}
+                                                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(node.content || '') }}
                                                 />
                                             ) : node.type === 'COMPARISON' && node.comparisonData ? (
                                                 <ComparisonTablePreview 

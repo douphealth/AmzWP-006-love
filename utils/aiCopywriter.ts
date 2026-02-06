@@ -109,7 +109,7 @@ export const enhanceProductCopy = async (
       urgencyHook: parsed.urgencyHook || '',
     };
   } catch (error) {
-    console.error('AI Copy Enhancement failed:', error);
+    void error;
     return {
       verdict: product.verdict || '',
       headline: product.title || '',

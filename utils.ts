@@ -21,16 +21,17 @@
  * ============================================================================
  */
 
-import { 
-  AppConfig, 
-  BlogPost, 
-  ProductDetails, 
-  DeploymentMode, 
-  AIProvider, 
-  ComparisonData, 
+import {
+  AppConfig,
+  BlogPost,
+  ProductDetails,
+  DeploymentMode,
+  AIProvider,
+  ComparisonData,
   FAQItem,
-  BoxStyle 
+  BoxStyle
 } from './types';
+import { deduplicateRequest } from './lib/request-dedup';
 
 // ============================================================================
 // CACHE & STORAGE CLASSES
@@ -140,13 +141,36 @@ export const IntelligenceCache = new IntelligenceCacheClass();
  * Secure Storage with Web Crypto API (simplified - sync fallback)
  */
 class SecureStorageClass {
-  // For simplicity, using base64 encoding as "encryption"
-  // In production, implement proper Web Crypto API encryption
-  
+  private static readonly ENCRYPTION_VERSION = 'v2:';
+
+  private deriveKey(): number[] {
+    // Combine multiple application constants into a rotating key buffer.
+    // This is not cryptographic-grade, but provides meaningful obfuscation
+    // of locally-stored API keys beyond plain base64.
+    const seeds = [
+      'app-secure-storage-salt-2024',
+      'xK9#mP2$vL5&nQ8@',
+      String(Math.PI).slice(0, 15),
+      String(Math.E).slice(0, 15),
+    ];
+    const combined = seeds.join('|');
+    const key: number[] = [];
+    for (let i = 0; i < combined.length; i++) {
+      key.push(combined.charCodeAt(i) ^ ((i * 31 + 17) & 0xff));
+    }
+    return key;
+  }
+
   encryptSync(text: string): string {
     if (!text) return '';
     try {
-      return btoa(text);
+      const key = this.deriveKey();
+      const encrypted: number[] = [];
+      for (let i = 0; i < text.length; i++) {
+        encrypted.push(text.charCodeAt(i) ^ key[i % key.length]);
+      }
+      const binaryString = String.fromCharCode(...encrypted);
+      return SecureStorageClass.ENCRYPTION_VERSION + btoa(binaryString);
     } catch {
       return text;
     }
@@ -155,6 +179,18 @@ class SecureStorageClass {
   decryptSync(encrypted: string): string {
     if (!encrypted) return '';
     try {
+      // Handle v2 encrypted values
+      if (encrypted.startsWith(SecureStorageClass.ENCRYPTION_VERSION)) {
+        const payload = encrypted.slice(SecureStorageClass.ENCRYPTION_VERSION.length);
+        const binaryString = atob(payload);
+        const key = this.deriveKey();
+        let decrypted = '';
+        for (let i = 0; i < binaryString.length; i++) {
+          decrypted += String.fromCharCode(binaryString.charCodeAt(i) ^ key[i % key.length]);
+        }
+        return decrypted;
+      }
+      // Backward compatibility: old base64-only values (no version prefix)
       return atob(encrypted);
     } catch {
       return encrypted;
@@ -250,7 +286,6 @@ const upgradeAmazonImageToHighRes = (imageUrl: string): string => {
     }
   }
 
-  console.log('[ImageUpgrade] Original:', imageUrl.substring(0, 80), '-> High-res:', upgradedUrl.substring(0, 80));
   return upgradedUrl;
 };
 
@@ -376,7 +411,6 @@ export const fetchWithSmartProxy = async (url: string, options: { timeout?: numb
 
   // Try direct fetch first (for same-origin or CORS-enabled sites)
   try {
-    console.log(`[Fetch] Direct: ${url.substring(0, 60)}...`);
     const response = await fetchWithTimeout(url, 8000, {
       headers: { 'Accept': 'text/xml, application/xml, text/html, */*' },
       mode: 'cors',
@@ -384,12 +418,11 @@ export const fetchWithSmartProxy = async (url: string, options: { timeout?: numb
     if (response.ok) {
       const text = await response.text();
       if (text && text.length > 50 && text.includes('<')) {
-        console.log(`[Fetch] Direct succeeded!`);
         return text;
       }
     }
   } catch (e: any) {
-    console.log(`[Fetch] Direct failed: ${e.message}`);
+    // Direct fetch failed, will try proxies
   }
 
   // Try each proxy
@@ -397,7 +430,6 @@ export const fetchWithSmartProxy = async (url: string, options: { timeout?: numb
     const startTime = Date.now();
     try {
       const proxyUrl = proxy.transform(url);
-      console.log(`[Proxy] ${proxy.name}: ${url.substring(0, 50)}...`);
 
       const response = await fetchWithTimeout(proxyUrl, proxy.timeout || timeout, {
         headers: { 'Accept': 'text/xml, application/xml, text/html, application/json, */*' },
@@ -420,13 +452,11 @@ export const fetchWithSmartProxy = async (url: string, options: { timeout?: numb
       proxyLatencyMap.set(proxy.name, latency);
       proxyFailureCount.set(proxy.name, 0);
       proxySuccessCount.set(proxy.name, (proxySuccessCount.get(proxy.name) ?? 0) + 1);
-      console.log(`[Proxy] ${proxy.name} OK in ${latency}ms`);
       return text;
 
     } catch (error: any) {
       const errorMsg = error.name === 'AbortError' ? 'Timeout' : error.message;
       errors.push(`${proxy.name}: ${errorMsg}`);
-      console.warn(`[Proxy] ${proxy.name} FAIL: ${errorMsg}`);
       proxyFailureCount.set(proxy.name, (proxyFailureCount.get(proxy.name) ?? 0) + 1);
       proxyLatencyMap.set(proxy.name, 999999);
     }
@@ -529,9 +559,6 @@ export const fetchAndParseSitemap = async (
   inputUrl: string,
   config: AppConfig
 ): Promise<BlogPost[]> => {
-  console.log('[Sitemap] ===== STARTING ENTERPRISE SCAN =====');
-  console.log('[Sitemap] Input URL:', inputUrl);
-
   // Extract base URL from input
   let baseUrl = inputUrl.trim().replace(/\/+$/, '');
   if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
@@ -545,19 +572,15 @@ export const fetchAndParseSitemap = async (
     // Keep as-is if URL parsing fails
   }
 
-  console.log('[Sitemap] Base URL:', baseUrl);
-
   // STRATEGY 1: WordPress REST API (Primary - Most Reliable, No CORS Issues)
   if (config.wpUrl && config.wpUser && config.wpAppPassword) {
-    console.log('[Sitemap] Attempting WordPress REST API fetch...');
     try {
       const wpPosts = await fetchAllPostsViaWordPressAPI(config);
       if (wpPosts.length > 0) {
-        console.log(`[Sitemap] WordPress REST API returned ${wpPosts.length} posts`);
         return wpPosts;
       }
-    } catch (wpError: any) {
-      console.warn('[Sitemap] WordPress REST API failed:', wpError.message);
+    } catch {
+      // WordPress REST API failed, will try sitemap XML
     }
   }
 
@@ -571,17 +594,13 @@ export const fetchAndParseSitemap = async (
     if (allPosts.length > 0) break;
 
     try {
-      console.log(`[Sitemap] Trying: ${sitemapUrl}`);
-
       const xml = await fetchWithSmartProxy(sitemapUrl, { timeout: 30000 });
 
       if (!xml || xml.length < 100 || !xml.includes('<') || !xml.includes('loc')) {
-        console.log('[Sitemap] Invalid response, skipping');
         continue;
       }
 
       const urls = parseSitemapXml(xml);
-      console.log(`[Sitemap] Parsed ${urls.length} URLs from ${sitemapUrl}`);
 
       if (urls.length === 0) continue;
 
@@ -589,13 +608,10 @@ export const fetchAndParseSitemap = async (
       const isIndex = urls.every(u => u.includes('sitemap') || u.endsWith('.xml'));
 
       if (isIndex) {
-        console.log('[Sitemap] Detected sitemap index, fetching all sub-sitemaps...');
-
         // Fetch ALL sub-sitemaps concurrently for speed
         const subSitemapResults = await Promise.allSettled(
           urls.map(async (subUrl, idx) => {
             await sleep(idx * 100); // Stagger requests slightly
-            console.log(`[Sitemap] Fetching sub-sitemap ${idx + 1}/${urls.length}: ${subUrl}`);
             const subXml = await fetchWithSmartProxy(subUrl, { timeout: 25000 });
             return parseSitemapXml(subXml);
           })
@@ -624,12 +640,8 @@ export const fetchAndParseSitemap = async (
 
     } catch (error: any) {
       lastError = error.message;
-      console.warn(`[Sitemap] Failed: ${sitemapUrl} - ${error.message}`);
     }
   }
-
-  console.log('[Sitemap] ===== SCAN COMPLETE =====');
-  console.log(`[Sitemap] Total posts found: ${allPosts.length}`);
 
   if (allPosts.length === 0) {
     throw new Error(
@@ -657,13 +669,9 @@ const fetchAllPostsViaWordPressAPI = async (config: AppConfig): Promise<BlogPost
   const perPage = 100;
   let hasMore = true;
 
-  console.log('[WP-API] Fetching all posts with pagination...');
-
   while (hasMore) {
     try {
       const url = `${apiBase}/posts?page=${page}&per_page=${perPage}&status=publish&_fields=id,title,link,content`;
-
-      console.log(`[WP-API] Fetching page ${page}...`);
 
       const response = await fetchWithTimeout(url, 20000, {
         headers: {
@@ -687,8 +695,6 @@ const fetchAllPostsViaWordPressAPI = async (config: AppConfig): Promise<BlogPost
         hasMore = false;
         break;
       }
-
-      console.log(`[WP-API] Page ${page}: Got ${posts.length} posts`);
 
       for (const post of posts) {
         const title = post.title?.rendered || 'Untitled';
@@ -716,13 +722,11 @@ const fetchAllPostsViaWordPressAPI = async (config: AppConfig): Promise<BlogPost
       // Small delay between pages
       if (hasMore) await sleep(200);
 
-    } catch (error: any) {
-      console.error(`[WP-API] Page ${page} failed:`, error.message);
+    } catch {
       hasMore = false;
     }
   }
 
-  console.log(`[WP-API] Total posts fetched: ${allPosts.length}`);
   return allPosts;
 };
 
@@ -918,7 +922,6 @@ export const fetchPageContent = async (
   // Check cache
   const cached = IntelligenceCache.get<{ content: string; title: string }>(cacheKey);
   if (cached) {
-    console.log('[Content] Returning cached content for:', url.substring(0, 50));
     return cached;
   }
 
@@ -970,8 +973,7 @@ const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
     IntelligenceCache.set(cacheKey, result, CACHE_TTL_SHORT_MS);
     return result;
 
-  } catch (error: any) {
-    console.error('[fetchPageContent] Failed:', error.message);
+  } catch {
     return { content: '', title: extractTitleFromUrl(url) };
   }
 };
@@ -1060,8 +1062,7 @@ const fetchViaWordPressAPI = async (
       content: posts[0].content?.rendered || posts[0].content?.raw || '',
       title: posts[0].title?.rendered || posts[0].title?.raw || '',
     };
-  } catch (error) {
-    console.warn('[fetchViaWordPressAPI] Failed:', error);
+  } catch {
     return null;
   }
 };
@@ -1074,16 +1075,11 @@ export const fetchRawPostContent = async (
   postId: number,
   postUrl: string
 ): Promise<{ content: string; resolvedId: number }> => {
-  console.log('[fetchRawPostContent] Fetching post:', postId, postUrl);
-
   // Try WordPress API with ID first
   if (config.wpUrl && config.wpUser && config.wpAppPassword) {
     try {
       const apiBase = config.wpUrl.replace(/\/$/, '') + '/wp-json/wp/v2';
       const auth = btoa(`${config.wpUser}:${config.wpAppPassword}`);
-
-      // Try to find post by ID
-      console.log('[fetchRawPostContent] Trying to fetch post by ID:', postId);
 
       let response = await fetchWithTimeout(
         `${apiBase}/posts/${postId}`,
@@ -1099,7 +1095,6 @@ export const fetchRawPostContent = async (
       if (response.ok) {
         const post = await response.json();
         const content = post.content?.rendered || post.content?.raw || '';
-        console.log('[fetchRawPostContent] Successfully fetched by ID, content length:', content.length);
 
         if (content.length > 50) {
           return {
@@ -1111,8 +1106,6 @@ export const fetchRawPostContent = async (
 
       // Fallback: search by URL slug
       if (postUrl) {
-        console.log('[fetchRawPostContent] Trying to fetch by URL slug');
-
         try {
           const urlObj = new URL(postUrl);
           const slug = urlObj.pathname.split('/').filter(s => s).pop();
@@ -1134,7 +1127,6 @@ export const fetchRawPostContent = async (
               const posts = await response.json();
               if (posts.length > 0) {
                 const content = posts[0].content?.rendered || posts[0].content?.raw || '';
-                console.log('[fetchRawPostContent] Found post by slug, content length:', content.length);
 
                 if (content.length > 50) {
                   return {
@@ -1161,7 +1153,6 @@ export const fetchRawPostContent = async (
               const pages = await response.json();
               if (pages.length > 0) {
                 const content = pages[0].content?.rendered || pages[0].content?.raw || '';
-                console.log('[fetchRawPostContent] Found page by slug, content length:', content.length);
 
                 if (content.length > 50) {
                   return {
@@ -1172,27 +1163,25 @@ export const fetchRawPostContent = async (
               }
             }
           }
-        } catch (slugError) {
-          console.warn('[fetchRawPostContent] Slug parsing failed:', slugError);
+        } catch {
+          // Slug parsing failed
         }
       }
-    } catch (error: any) {
-      console.warn('[fetchRawPostContent] WP API failed:', error.message);
+    } catch {
+      // WP API failed
     }
   }
 
   // Fallback to proxy fetch if we have a URL
   if (postUrl) {
-    console.log('[fetchRawPostContent] Falling back to proxy fetch for:', postUrl);
     try {
       const { content } = await fetchPageContent(config, postUrl);
 
       if (content && content.length > 50) {
-        console.log('[fetchRawPostContent] Proxy fetch successful, content length:', content.length);
         return { content, resolvedId: postId };
       }
-    } catch (proxyError: any) {
-      console.error('[fetchRawPostContent] Proxy fetch failed:', proxyError);
+    } catch {
+      // Proxy fetch failed
     }
   }
 
@@ -1249,8 +1238,6 @@ export const pushToWordPress = async (
 export const testConnection = async (
   config: AppConfig
 ): Promise<ConnectionTestResult> => {
-  console.log('[testConnection] Testing WordPress connection...');
-
   if (!config.wpUrl) {
     return { success: false, message: 'WordPress URL is required' };
   }
@@ -1267,8 +1254,6 @@ export const testConnection = async (
     const baseUrl = config.wpUrl.replace(/\/$/, '');
     const apiUrl = `${baseUrl}/wp-json/wp/v2/users/me`;
 
-    console.log('[testConnection] Connecting to:', apiUrl);
-
     const auth = btoa(`${config.wpUser}:${config.wpAppPassword}`);
 
     const response = await fetchWithTimeout(
@@ -1282,11 +1267,8 @@ export const testConnection = async (
       }
     );
 
-    console.log('[testConnection] Response status:', response.status);
-
     if (response.ok) {
       const user = await response.json();
-      console.log('[testConnection] Successfully connected as:', user.name || user.slug);
       return {
         success: true,
         message: `Connected as ${user.name || user.slug}`,
@@ -1297,34 +1279,28 @@ export const testConnection = async (
         },
       };
     } else if (response.status === 401) {
-      console.warn('[testConnection] Authentication failed');
       return {
         success: false,
         message: 'Invalid credentials: Check your username and app password',
       };
     } else if (response.status === 403) {
-      console.warn('[testConnection] Access forbidden');
       return {
         success: false,
         message: 'Access denied: User lacks required permissions',
       };
     } else if (response.status === 404) {
-      console.warn('[testConnection] REST API not found');
       return {
         success: false,
         message: 'WordPress REST API not found. Check your site URL.',
       };
     } else {
       const errorText = await response.text().catch(() => 'Unknown error');
-      console.error('[testConnection] Failed with status:', response.status, errorText);
       return {
         success: false,
         message: `Connection failed (${response.status}): ${errorText.substring(0, 50)}`,
       };
     }
   } catch (error: any) {
-    console.error('[testConnection] Exception:', error);
-
     if (error.name === 'AbortError') {
       return { success: false, message: 'Connection timeout - server not responding' };
     }
@@ -1362,8 +1338,6 @@ export const callAIProvider = async (
 ): Promise<AIResponse> => {
   const provider = config.aiProvider || 'gemini';
   const { temperature = 0.7, maxTokens = 8192, jsonMode = true } = options;
-
-  console.log(`[AI] Calling ${provider} with model ${config.aiModel || 'default'}`);
 
   switch (provider) {
     case 'gemini':
@@ -1411,8 +1385,6 @@ const callGemini = async (
 
   const model = config.aiModel || 'gemini-2.0-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  console.log('[Gemini] Calling API with model:', model);
 
   const response = await fetchWithTimeout(
     url,
@@ -1482,8 +1454,6 @@ const callOpenAI = async (
 
   const model = config.aiModel || 'gpt-4o';
 
-  console.log('[OpenAI] Calling API with model:', model);
-
   const response = await fetchWithTimeout(
     'https://api.openai.com/v1/chat/completions',
     API_TIMEOUT_MS,
@@ -1552,8 +1522,6 @@ const callAnthropic = async (
 
   const model = config.aiModel || 'claude-3-5-sonnet-20241022';
 
-  console.log('[Anthropic] Calling API with model:', model);
-
   const response = await fetchWithTimeout(
     'https://api.anthropic.com/v1/messages',
     API_TIMEOUT_MS,
@@ -1616,8 +1584,6 @@ const callGroq = async (
 
   const model = config.customModel || 'llama-3.3-70b-versatile';
 
-  console.log('[Groq] Calling API with model:', model);
-
   const response = await fetchWithTimeout(
     'https://api.groq.com/openai/v1/chat/completions',
     API_TIMEOUT_MS,
@@ -1679,13 +1645,7 @@ const callOpenRouter = async (
     throw new Error('OpenRouter API key not configured. Please add your API key in Settings > Brain Core.');
   }
 
-  if (!apiKey.startsWith('sk-or-')) {
-    console.warn('[OpenRouter] API key format may be invalid. Expected format: sk-or-v1-...');
-  }
-
   const model = config.customModel || 'anthropic/claude-3.5-sonnet';
-
-  console.log('[OpenRouter] Calling API with model:', model);
 
   const response = await fetchWithTimeout(
     'https://openrouter.ai/api/v1/chat/completions',
@@ -1828,23 +1788,10 @@ export const analyzeContentAndFindProduct = async (
   content: string,
   config: AppConfig
 ): Promise<AnalysisResult> => {
-  console.log('');
-  console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║  PRODUCT DETECTION SYSTEM STARTING                        ║');
-  console.log('╚═══════════════════════════════════════════════════════════╝');
-  console.log('[DETECTION] Title:', title);
-  console.log('[DETECTION] Content length:', content.length);
-  console.log('[DETECTION] Config:', {
-    aiProvider: config.aiProvider,
-    hasSerpApiKey: !!config.serpApiKey,
-    serpApiKeyLength: config.serpApiKey?.length || 0
-  });
-
   const contentHash = hashString(`${title}_${content.substring(0, 500)}_${content.length}_v2`);
 
   const cached = IntelligenceCache.getAnalysis(contentHash);
   if (cached) {
-    console.log('[Analysis] Returning cached analysis');
     return {
       detectedProducts: cached.products,
       comparison: cached.comparison,
@@ -1861,63 +1808,33 @@ export const analyzeContentAndFindProduct = async (
   const cleanContent = stripHtml(truncatedContent);
   const contentLower = cleanContent.toLowerCase();
 
-  console.log('');
-  console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║  PHASE 1: Pattern Detection                               ║');
-  console.log('╚═══════════════════════════════════════════════════════════╝');
   const phase1Products = extractProductsPhase1(truncatedContent, cleanContent);
-  console.log('[Phase 1] ✓ Complete. Found:', phase1Products.length, 'potential products');
-
-  if (phase1Products.length === 0) {
-    console.warn('[Phase 1] ⚠ NO PRODUCTS DETECTED by pattern matching');
-    console.warn('[Phase 1] Content preview:', cleanContent.substring(0, 200));
-  } else {
-    phase1Products.forEach((p: any, i: number) => {
-      console.log(`  [${i + 1}] ${p.name} (${p.sourceType}, confidence: ${p.confidence}${p.asin ? ', ASIN: ' + p.asin : ''})`);
-    });
-  }
 
   // Check for SerpAPI key
   if (!config.serpApiKey || config.serpApiKey.trim().length === 0) {
-    console.error('');
-    console.error('╔═══════════════════════════════════════════════════════════╗');
-    console.error('║  ✗✗✗ CRITICAL ERROR: NO SERPAPI KEY ✗✗✗                  ║');
-    console.error('╚═══════════════════════════════════════════════════════════╝');
-    console.error('[DETECTION] Cannot enrich products without SerpAPI key!');
-    console.error('[DETECTION] Go to Settings > Amazon and enter your SerpAPI key');
     throw new Error('SerpAPI key is required for product detection. Add it in Settings > Amazon.');
   }
 
   // AGGRESSIVE: If we have Phase 1 products and SerpAPI, use them directly
   if (phase1Products.length > 0 && config.serpApiKey) {
-    console.log('');
-    console.log('╔═══════════════════════════════════════════════════════════╗');
-    console.log('║  PHASE 1 ENRICHMENT: Direct SerpAPI Lookup                ║');
-    console.log('╚═══════════════════════════════════════════════════════════╝');
     const quickProducts: ProductDetails[] = [];
 
     for (let i = 0; i < Math.min(phase1Products.length, 10); i++) {
       const p1 = phase1Products[i];
-      console.log(`[Phase 1 Enrich ${i + 1}/${Math.min(phase1Products.length, 10)}] ${p1.name}`);
 
       try {
         let productData: Partial<ProductDetails> = {};
 
         if (p1.asin) {
-          console.log(`  → ASIN lookup: ${p1.asin}`);
           const result = await fetchProductByASIN(p1.asin, config.serpApiKey);
           if (result) productData = result;
         }
 
         if (!productData.asin) {
-          console.log(`  → Search: "${p1.name}"`);
           productData = await searchAmazonProduct(p1.name, config.serpApiKey);
         }
 
-        console.log(`  → Result: ASIN=${!!productData.asin}, Image=${!!productData.imageUrl}, Price=${productData.price}`);
-
         if (productData.asin && productData.imageUrl && productData.price && productData.price !== '$XX.XX') {
-          console.log(`  ✓ VALID PRODUCT`);
           quickProducts.push({
             id: `prod-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             title: productData.title || p1.name,
@@ -1937,28 +1854,17 @@ export const analyzeContentAndFindProduct = async (
             specs: {},
             confidence: p1.confidence,
           });
-        } else {
-          console.log(`  ✗ Incomplete data`);
         }
 
         if (i < Math.min(phase1Products.length, 10) - 1) {
           await sleep(150);
         }
-      } catch (err: any) {
-        console.error(`  ✗ Error: ${err.message}`);
+      } catch {
+        // Error enriching product, skip
       }
     }
 
     if (quickProducts.length > 0) {
-      console.log('');
-      console.log('╔═══════════════════════════════════════════════════════════╗');
-      console.log(`║  ✓✓✓ PHASE 1 SUCCESS: ${quickProducts.length} PRODUCTS${' '.repeat(Math.max(0, 24 - quickProducts.length.toString().length))}║`);
-      console.log('╚═══════════════════════════════════════════════════════════╝');
-      quickProducts.forEach((p, i) => {
-        console.log(`  [${i + 1}] ${p.title.substring(0, 50)}`);
-        console.log(`      ASIN: ${p.asin}, Price: ${p.price}`);
-      });
-
       // Create comparison table if we have 3+ products
       let comparison: ComparisonData | undefined;
       if (quickProducts.length >= 3) {
@@ -1968,7 +1874,6 @@ export const analyzeContentAndFindProduct = async (
           productIds,
           specs: ['Price', 'Rating', 'Reviews'],
         };
-        console.log(`  ✓ Comparison table created with ${productIds.length} products`);
       }
 
       IntelligenceCache.setAnalysis(contentHash, { products: quickProducts, comparison });
@@ -1978,9 +1883,6 @@ export const analyzeContentAndFindProduct = async (
         contentType: 'informational',
         monetizationPotential: quickProducts.length >= 3 ? 'high' : 'medium',
       };
-    } else {
-      console.warn('');
-      console.warn('[Phase 1] ✗ No valid products after enrichment - continuing to AI analysis');
     }
   }
 
@@ -1994,12 +1896,6 @@ export const analyzeContentAndFindProduct = async (
     .replace('{{PRE_DETECTED}}', preDetectedList);
 
   try {
-    console.log('');
-    console.log('╔═══════════════════════════════════════════════════════════╗');
-    console.log('║  PHASE 2: AI Analysis                                     ║');
-    console.log('╚═══════════════════════════════════════════════════════════╝');
-    console.log('[Phase 2] Calling AI provider:', config.aiProvider);
-
     const response = await callAIProvider(
       config,
       ANALYSIS_SYSTEM_PROMPT,
@@ -2007,31 +1903,18 @@ export const analyzeContentAndFindProduct = async (
       { temperature: 0.3, jsonMode: true }
     );
 
-    console.log('[Phase 2] ✓ AI response received');
-
     let parsed: any;
     try {
       const jsonMatch = response.text.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : response.text);
-      console.log('[Phase 2] ✓ JSON parsed successfully');
-    } catch (parseError) {
-      console.error('[Phase 2] ✗ Failed to parse AI response:', parseError);
-      console.error('[Phase 2] Raw response:', response.text.substring(0, 200));
+    } catch {
       parsed = { products: [], contentType: 'informational' };
-    }
-
-    console.log('[Phase 2] AI detected:', parsed.products?.length || 0, 'products');
-    if (parsed.products && parsed.products.length > 0) {
-      parsed.products.forEach((p: any, i: number) => {
-        console.log(`  [${i + 1}] ${p.title} (confidence: ${p.confidence})`);
-      });
     }
 
     const validatedProducts = new Map<string, any>();
 
     for (const p of (parsed.products || [])) {
       if (p.confidence < 30) {
-        console.log('[Analysis] Skipping very low confidence:', p.title, p.confidence);
         continue;
       }
 
@@ -2047,7 +1930,6 @@ export const analyzeContentAndFindProduct = async (
         const hasAnyMatch = searchWords.filter((w: string) => w.length > 3)
           .some((word: string) => contentLower.includes(word));
         if (!hasAnyMatch) {
-          console.log('[Analysis] Product not found in content:', p.title);
           continue;
         }
       }
@@ -2073,11 +1955,6 @@ export const analyzeContentAndFindProduct = async (
       }
     }
 
-    console.log('');
-    console.log('╔═══════════════════════════════════════════════════════════╗');
-    console.log(`║  PHASE 3: SerpAPI Enrichment (${validatedProducts.size} products)${' '.repeat(Math.max(0, 17 - validatedProducts.size.toString().length))}║`);
-    console.log('╚═══════════════════════════════════════════════════════════╝');
-
     const products: ProductDetails[] = [];
     const serpApiQueue: Array<{ key: string; product: any; asin?: string }> = [];
 
@@ -2095,34 +1972,23 @@ export const analyzeContentAndFindProduct = async (
       const batch = serpApiQueue.slice(i, i + batchSize);
 
       const batchPromises = batch.map(async ({ key, product, asin }) => {
-        console.log(`[Phase 3] Processing: ${product.title || product.searchQuery}`);
         let productData: Partial<ProductDetails> = {};
 
         if (config.serpApiKey) {
           try {
             if (asin) {
-              console.log(`  → ASIN lookup: ${asin}`);
               const asinResult = await fetchProductByASIN(asin, config.serpApiKey);
               if (asinResult) {
                 productData = asinResult;
-                console.log(`  ✓ ASIN lookup successful`);
-              } else {
-                console.log(`  ✗ ASIN lookup returned no data`);
               }
             }
 
             if (!productData.asin) {
               const searchQuery = optimizeSearchQuery(product.searchQuery || product.title);
-              console.log(`  → Searching: "${searchQuery}"`);
               productData = await searchAmazonProduct(searchQuery, config.serpApiKey);
-              if (productData.asin) {
-                console.log(`  ✓ Search successful: ${productData.asin}`);
-              } else {
-                console.log(`  ✗ Search returned no product`);
-              }
             }
-          } catch (error: any) {
-            console.error(`  ✗ SerpAPI error: ${error.message}`);
+          } catch {
+            // SerpAPI error, skip
           }
         }
 
@@ -2137,12 +2003,8 @@ export const analyzeContentAndFindProduct = async (
         const hasValidPrice = productData.price && productData.price !== '$XX.XX';
 
         if (!hasAsin || !hasImage || !hasValidPrice) {
-          console.warn(`[Phase 3] ✗ Rejected: ${product.title}`);
-          console.warn(`  Reason: ASIN=${hasAsin}, Image=${hasImage}, Price=${hasValidPrice} (${productData.price})`);
           continue;
         }
-
-        console.log(`[Phase 3] ✓ Accepted: ${productData.title?.substring(0, 40)} (${productData.asin})`);
 
         const insertionIndex = typeof product.paragraphNumber === 'number' ? product.paragraphNumber : 0;
 
@@ -2193,17 +2055,6 @@ export const analyzeContentAndFindProduct = async (
 
     IntelligenceCache.setAnalysis(contentHash, { products, comparison });
 
-    console.log('');
-    console.log('╔═══════════════════════════════════════════════════════════╗');
-    console.log(`║  ✓✓✓ DETECTION COMPLETE: ${products.length} PRODUCTS FOUND${' '.repeat(Math.max(0, 17 - products.length.toString().length))}║`);
-    console.log('╚═══════════════════════════════════════════════════════════╝');
-
-    if (products.length === 0) {
-      console.error('[DETECTION] ✗✗✗ ZERO PRODUCTS FOUND!');
-      console.error('[DETECTION] This should not happen if Phase 1 detected products');
-      console.error('[DETECTION] Check SerpAPI responses above for errors');
-    }
-
     return {
       detectedProducts: products,
       comparison,
@@ -2213,10 +2064,7 @@ export const analyzeContentAndFindProduct = async (
     };
 
   } catch (error: any) {
-    console.error('[analyzeContentAndFindProduct] Error:', error);
-
     if (phase1Products.length > 0 && config.serpApiKey) {
-      console.log('[Analysis] Falling back to Phase 1 products');
       const fallbackProducts: ProductDetails[] = [];
 
       for (const p1 of phase1Products.slice(0, 5)) {
@@ -2492,8 +2340,6 @@ const callSerpApiProxy = async (params: {
 }): Promise<any> => {
   const edgeFunctionUrl = `${SUPABASE_URL}/functions/v1/serpapi-proxy`;
 
-  console.log('[SerpAPI Proxy] Calling edge function for', params.type);
-
   const response = await fetchWithTimeout(edgeFunctionUrl, 30000, {
     method: 'POST',
     headers: {
@@ -2585,20 +2431,17 @@ export const searchAmazonProduct = async (
   const cleanKey = getApiKey(apiKey);
 
   if (!cleanKey) {
-    console.warn('[SerpAPI] No API key provided');
     return {};
   }
 
-  console.log('[SerpAPI] ✓ Valid API key (length:', cleanKey.length, ', first 8 chars:', cleanKey.substring(0, 8) + ')');
+  const dedupKey = `search:${query.toLowerCase().trim()}`;
+  return deduplicateRequest(dedupKey, async () => {
 
   const cacheKey = `serp_${hashString(query.toLowerCase())}`;
   const cached = IntelligenceCache.get<Partial<ProductDetails>>(cacheKey);
   if (cached && cached.asin && cached.price !== '$XX.XX' && cached.imageUrl) {
-    console.log('[SerpAPI] Returning cached result for:', query.substring(0, 30));
     return cached;
   }
-
-  console.log('[SerpAPI] Searching for:', query);
 
   try {
     const data = await callSerpApiProxy({
@@ -2607,28 +2450,16 @@ export const searchAmazonProduct = async (
       apiKey: cleanKey,
     });
 
-    console.log('[SerpAPI] Response keys:', Object.keys(data));
-    console.log('[SerpAPI] organic_results:', data.organic_results?.length || 0);
-    console.log('[SerpAPI] shopping_results:', data.shopping_results?.length || 0);
-
     const allResults = [
       ...(data.organic_results || []),
       ...(data.shopping_results || []),
     ];
 
     if (allResults.length === 0) {
-      console.warn('[SerpAPI] No results for:', query);
       return {};
     }
 
     const result = allResults.find(r => r.asin && (extractImage(r) || r.thumbnail)) || allResults[0];
-
-    console.log('[SerpAPI] Selected result:', {
-      asin: result.asin,
-      title: result.title?.substring(0, 40),
-      hasImage: !!extractImage(result),
-      priceFields: Object.keys(result).filter(k => k.includes('price'))
-    });
 
     const product: Partial<ProductDetails> = {
       asin: result.asin || '',
@@ -2641,35 +2472,20 @@ export const searchAmazonProduct = async (
       brand: result.brand || '',
     };
 
-    console.log('[SerpAPI] Final product:', {
-      asin: product.asin,
-      price: product.price,
-      hasImage: !!product.imageUrl,
-      rating: product.rating
-    });
-
     if (product.asin && product.price !== '$XX.XX') {
       IntelligenceCache.set(cacheKey, product, CACHE_TTL_MS);
     }
 
     return product;
 
-  } catch (error: any) {
-    console.error('[searchAmazonProduct] Error:', error.message);
+  } catch {
     return {};
   }
+
+  }); // end deduplicateRequest
 };
 
 const extractProductPrice = (result: any): string => {
-  console.log('[extractProductPrice] Analyzing price structure:', {
-    hasBuyboxWinner: !!result.buybox_winner,
-    hasBuyboxPrice: !!result.buybox_winner?.price,
-    hasPrice: !!result.price,
-    priceType: typeof result.price,
-    hasPricing: !!result.pricing,
-    hasPriceString: !!result.price_string
-  });
-
   const priceFields = [
     result.buybox_winner?.price?.raw,
     result.buybox_winner?.price?.value ? `$${result.buybox_winner.price.value}` : null,
@@ -2693,25 +2509,14 @@ const extractProductPrice = (result: any): string => {
   for (let i = 0; i < priceFields.length; i++) {
     const field = priceFields[i];
     if (field && typeof field === 'string' && field.includes('$')) {
-      console.log(`[extractProductPrice] ✓ Found price at field index ${i}:`, field);
       return field;
     }
   }
 
-  console.warn('[extractProductPrice] ✗ No valid price found, returning placeholder');
   return '$XX.XX';
 };
 
 const extractProductImage = (result: any): string => {
-  console.log('[extractProductImage] Analyzing result structure:', {
-    hasMainImage: !!result.main_image,
-    mainImageType: typeof result.main_image,
-    hasImages: !!result.images,
-    imagesLength: Array.isArray(result.images) ? result.images.length : 0,
-    hasThumbnail: !!result.thumbnail,
-    hasImage: !!result.image
-  });
-
   const imageFields = [
     result.main_image?.link,
     typeof result.main_image === 'string' ? result.main_image : null,
@@ -2737,12 +2542,10 @@ const extractProductImage = (result: any): string => {
   for (let i = 0; i < imageFields.length; i++) {
     const field = imageFields[i];
     if (field && typeof field === 'string' && field.startsWith('http')) {
-      console.log(`[extractProductImage] ✓ Found image at field index ${i}:`, field.substring(0, 80));
       return upgradeAmazonImageToHighRes(field);
     }
   }
 
-  console.error('[extractProductImage] ✗ No valid image URL found in result');
   return '';
 };
 
@@ -2756,39 +2559,30 @@ export const fetchProductByASIN = async (
   const cleanKey = getApiKey(apiKey);
 
   if (!cleanKey || !asin) {
-    console.warn('[fetchProductByASIN] Missing API key or ASIN');
     throw new Error('Missing API key or ASIN');
   }
 
   if (!/^[A-Z0-9]{10}$/i.test(asin)) {
-    console.warn('[fetchProductByASIN] Invalid ASIN format:', asin);
     throw new Error('Invalid ASIN format');
   }
 
+  return deduplicateRequest(`product:${asin}`, async () => {
+
   const cached = IntelligenceCache.getProduct(asin);
   if (cached && cached.price !== '$XX.XX' && cached.imageUrl) {
-    console.log('[SerpAPI] Returning cached product:', asin);
     return cached;
   }
 
-  console.log('[SerpAPI] Fetching product by ASIN:', asin);
-
   try {
-    console.log('[fetchProductByASIN] Calling SerpAPI proxy...');
     const data = await callSerpApiProxy({
       type: 'product',
       asin,
       apiKey: cleanKey,
     });
 
-    console.log('[fetchProductByASIN] Response received. Top-level keys:', Object.keys(data));
-
     const result = data.product_results || data.product_result;
 
     if (!result) {
-      console.error('[fetchProductByASIN] No product_results or product_result in response');
-      console.error('[fetchProductByASIN] Available keys:', Object.keys(data));
-
       if (data.error) {
         throw new Error(data.error);
       }
@@ -2798,31 +2592,8 @@ export const fetchProductByASIN = async (
       throw new Error('Product not found or invalid ASIN');
     }
 
-    console.log('[fetchProductByASIN] Product data extracted successfully');
-    console.log('[fetchProductByASIN] Product title:', result.title?.substring(0, 50));
-
     const price = extractProductPrice(result);
     const imageUrl = extractProductImage(result);
-
-    if (!imageUrl) {
-      console.error('[fetchProductByASIN] ✗✗✗ CRITICAL: No image URL extracted!');
-      console.error('[fetchProductByASIN] Result structure:', JSON.stringify({
-        hasMainImage: !!result.main_image,
-        mainImageType: typeof result.main_image,
-        hasImages: !!result.images,
-        imagesSample: result.images?.[0] ? Object.keys(result.images[0]) : null
-      }));
-    }
-
-    if (price === '$XX.XX') {
-      console.error('[fetchProductByASIN] ✗✗✗ CRITICAL: No price extracted!');
-      console.error('[fetchProductByASIN] Price structure:', JSON.stringify({
-        hasBuyboxWinner: !!result.buybox_winner,
-        buyboxPriceSample: result.buybox_winner?.price,
-        priceType: typeof result.price,
-        priceSample: result.price
-      }));
-    }
 
     const partialProduct = {
       title: result.title || 'Unknown Product',
@@ -2852,28 +2623,17 @@ export const fetchProductByASIN = async (
       deploymentMode: 'ELITE_BENTO',
     };
 
-    console.log('[fetchProductByASIN] ✓✓✓ Product constructed successfully:');
-    console.log('  ASIN:', product.asin);
-    console.log('  Title:', product.title?.substring(0, 50));
-    console.log('  Price:', product.price);
-    console.log('  Image:', imageUrl ? `✓ ${imageUrl.substring(0, 60)}` : '✗ MISSING');
-    console.log('  Rating:', product.rating);
-    console.log('  Reviews:', product.reviewCount);
-
     if (product.price !== '$XX.XX' && product.imageUrl) {
       IntelligenceCache.setProduct(asin, product);
-      console.log('[fetchProductByASIN] ✓ Cached product successfully');
-    } else {
-      console.warn('[fetchProductByASIN] ⚠ Product not cached (missing price or image)');
     }
 
     return product;
 
   } catch (error: any) {
-    console.error('[fetchProductByASIN] ✗✗✗ ERROR:', error.message);
-    console.error('[fetchProductByASIN] Error stack:', error.stack);
     throw error;
   }
+
+  }); // end deduplicateRequest
 };
 
 // ============================================================================
@@ -3011,7 +2771,6 @@ export const runConcurrent = async <T, R>(
       const result = await processor(item, idx);
       results[idx] = result;
     } catch (error) {
-      console.warn(`[runConcurrent] Item ${idx} failed:`, error);
       onError?.(error, item, idx);
       results[idx] = undefined as any;
     } finally {
@@ -3765,8 +3524,6 @@ export const fetchPostsFromWordPressAPI = async (
     while (currentPage <= totalPages) {
       const url = `${apiBase}/posts?page=${currentPage}&per_page=${perPage}&_embed=false`;
 
-      console.log(`[WP API] Fetching page ${currentPage}/${totalPages}...`);
-
       const response = await fetchWithTimeout(url, 30000, { headers });
 
       if (!response.ok) {
@@ -3781,7 +3538,6 @@ export const fetchPostsFromWordPressAPI = async (
         const totalPostsHeader = response.headers.get('X-WP-Total');
         totalPages = totalPagesHeader ? parseInt(totalPagesHeader, 10) : 1;
         totalPosts = totalPostsHeader ? parseInt(totalPostsHeader, 10) : 0;
-        console.log(`[WP API] Total posts: ${totalPosts}, Total pages: ${totalPages}`);
       }
 
       const posts = await response.json();
@@ -3817,13 +3573,10 @@ export const fetchPostsFromWordPressAPI = async (
       }
     }
 
-    console.log(`[WP API] Fetched ${allPosts.length} total posts`);
     return allPosts;
 
   } catch (error: any) {
-    console.error('[fetchPostsFromWordPressAPI] Error:', error);
     if (allPosts.length > 0) {
-      console.log(`[WP API] Returning ${allPosts.length} posts fetched before error`);
       return allPosts;
     }
     throw new Error(`Failed to fetch posts from WordPress: ${error.message}`);
@@ -3867,24 +3620,3 @@ export default {
   validateManualUrl,
   createBlogPostFromUrl,
 };
-
-// ============================================================================
-// DEBUG UTILITIES - Available in browser console as window.amzDebug
-// ============================================================================
-if (typeof window !== 'undefined') {
-  (window as any).amzDebug = {
-    clearCache: () => {
-      IntelligenceCache.clear();
-      console.log('[DEBUG] Cache cleared');
-    },
-    clearProduct: (asin: string) => {
-      IntelligenceCache.deleteProduct(asin);
-      console.log(`[DEBUG] Cleared cache for product: ${asin}`);
-    },
-    viewCache: () => {
-      console.log('[DEBUG] Cache not directly accessible, but you can clear specific products with clearProduct(asin)');
-    }
-  };
-  console.log('[AMZ] Debug utilities available: window.amzDebug.clearCache(), window.amzDebug.clearProduct(asin)');
-}
-2240
