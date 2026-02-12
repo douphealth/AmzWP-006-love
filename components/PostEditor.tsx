@@ -1039,64 +1039,75 @@ export const PostEditor: React.FC<PostEditorProps> = ({ post, config, onBack }) 
                         </div>
                       )}
 
-                      {/* ---- RENDER NODE CONTENT ---- */}
-                      <div className="p-2 md:p-6">
-                        {node.type === 'HTML' ? (
-                          <div
-                            className="prose prose-xl prose-slate max-w-none focus:outline-none focus:ring-2 focus:ring-brand-100 rounded-xl p-2 transition-all"
-                            contentEditable
-                            suppressContentEditableWarning
-                            onBlur={(e) => updateHtmlNode(node.id, e.currentTarget.innerHTML)}
-                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(node.content || '') }}
-                          />
-                        ) : node.type === 'COMPARISON' && node.comparisonData ? (
-                          <ComparisonTablePreview
-                            data={node.comparisonData}
-                            products={Object.values(productMap)}
-                            affiliateTag={config.amazonTag}
-                            allProducts={Object.values(productMap)}
-                            editable
-                            onUpdate={(updated) => updateComparisonData(node.id, updated)}
-                          />
-                        ) : node.productId && productMap[node.productId] ? (
-                          <div className="relative">
-                            {config.boxStyle === 'PREMIUM' ? (
-                              <PremiumProductBox
-                                product={productMap[node.productId]}
-                                affiliateTag={config.amazonTag}
-                                mode={productMap[node.productId].deploymentMode}
-                              />
-                            ) : (
-                              <ProductBoxPreview
-                                product={productMap[node.productId]}
-                                affiliateTag={config.amazonTag}
-                                mode={productMap[node.productId].deploymentMode}
-                              />
-                            )}
+                     {/* ---- RENDER NODE CONTENT ---- */}
+<div className="p-2 md:p-6">
+  {node.type === 'HTML' ? (
+    <div
+      className="prose prose-xl prose-slate max-w-none focus:outline-none focus:ring-2 focus:ring-brand-100 rounded-xl p-2 transition-all"
+      contentEditable
+      suppressContentEditableWarning
+      onBlur={(e) => updateHtmlNode(node.id, e.currentTarget.innerHTML)}
+      dangerouslySetInnerHTML={{ __html: sanitizeHtml(node.content || '') }}
+    />
+  ) : node.type === 'COMPARISON' && node.comparisonData ? (
+    <ComparisonTablePreview
+      data={node.comparisonData}
+      products={Object.values(productMap)}
+      affiliateTag={config.amazonTag}
+      allProducts={Object.values(productMap)}
+      editable={true}
+      onUpdate={(updatedData) => {
+        setEditorNodes((prev) =>
+          prev.map((n) =>
+            n.id === node.id
+              ? { ...n, comparisonData: updatedData }
+              : n
+          )
+        );
+      }}
+    />
+  ) : node.productId && productMap[node.productId] ? (
+    <div className="relative">
+      {config.boxStyle === 'PREMIUM' ? (
+        <PremiumProductBox
+          product={productMap[node.productId]}
+          affiliateTag={config.amazonTag}
+          mode={productMap[node.productId].deploymentMode}
+        />
+      ) : (
+        <ProductBoxPreview
+          product={productMap[node.productId]}
+          affiliateTag={config.amazonTag}
+          mode={productMap[node.productId].deploymentMode}
+        />
+      )}
 
-                            {/* Product Mode Switcher */}
-                            {hoveredNode === node.id && (
-                              <div className="absolute top-6 right-6 flex gap-3 z-30 animate-fade-in">
-                                {(['ELITE_BENTO', 'TACTICAL_LINK'] as DeploymentMode[]).map((m) => (
-                                  <button
-                                    key={m}
-                                    onClick={() => updateProductMode(node.productId!, m)}
-                                    className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider shadow-lg transition-all ${
-                                      productMap[node.productId!]?.deploymentMode === m ? 'bg-dark-950 text-white' : 'bg-white text-slate-500'
-                                    }`}
-                                  >
-                                    {m === 'ELITE_BENTO' ? 'Bento' : 'Tactical'}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="p-8 bg-red-50 text-red-400 font-mono text-xs text-center border border-red-100 rounded-2xl">
-                            Asset Data Missing — Product may have been removed
-                          </div>
-                        )}
-                      </div>
+      {/* Product Mode Switcher */}
+      {hoveredNode === node.id && (
+        <div className="absolute top-6 right-6 flex gap-3 z-30 animate-fade-in">
+          {(['ELITE_BENTO', 'TACTICAL_LINK'] as DeploymentMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => updateProductMode(node.productId!, m)}
+              className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider shadow-lg transition-all ${
+                productMap[node.productId!]?.deploymentMode === m
+                  ? 'bg-dark-950 text-white'
+                  : 'bg-white text-slate-500'
+              }`}
+            >
+              {m === 'ELITE_BENTO' ? 'Bento' : 'Tactical'}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : (
+    <div className="p-8 bg-red-50 text-red-400 font-mono text-xs text-center border border-red-100 rounded-2xl">
+      Asset Data Missing — Product may have been removed
+    </div>
+  )}
+</div>
+
 
                       {/* ---- DROP ZONE INDICATOR (below) ---- */}
                       {isDropTarget && dragState.dropPosition === 'after' && (
