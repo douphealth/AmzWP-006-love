@@ -8,7 +8,7 @@
  *  VISUAL
  *  - Glassmorphic card with dynamic border glow
  *  - Mouse-tracking spotlight & subtle parallax on image
- *  - Animated gradient "ribbon" badge (Editor's Choice / Top Pick)
+ *  - Animated gradient ribbon badge (Editor's Choice / Top Pick)
  *  - Responsive bento grid: image | content | action
  *  - Half-star precision rating with review count
  *  - Prime badge with lightning icon
@@ -31,7 +31,7 @@
  *  - Tailwind-first (scoped CSS only for mouse-tracking)
  *  - useReducedMotion aware
  *  - Accessible (aria labels, keyboard navigation, focus rings)
- *  - Responsive (mobile → desktop bento shift)
+ *  - Responsive (mobile to desktop bento shift)
  *  - Error-resilient image loading with graceful fallback
  *  - Memoized derived values
  *  - Zero external dependencies beyond React + Tailwind
@@ -86,7 +86,7 @@ const DEFAULT_FAQS: FAQItem[] = [
       'Based on thousands of positive reviews, this is a proven choice for discerning buyers who demand quality.',
   },
   {
-    question: 'What's included in the box?',
+    question: "What's included in the box?",
     answer:
       'Complete package with all necessary accessories and detailed documentation.',
   },
@@ -99,7 +99,6 @@ const DEFAULT_VERDICT =
 // HOOKS
 // ============================================================================
 
-/** Respect prefers-reduced-motion */
 const useReducedMotion = (): boolean => {
   const [reduced, setReduced] = useState(() =>
     typeof window !== 'undefined'
@@ -120,7 +119,6 @@ const useReducedMotion = (): boolean => {
 // SUB-COMPONENTS
 // ============================================================================
 
-/** Precise half-star rating */
 const StarRating: React.FC<{ rating: number; className?: string }> = ({
   rating,
   className = '',
@@ -138,13 +136,13 @@ const StarRating: React.FC<{ rating: number; className?: string }> = ({
       {hasHalf && (
         <svg className="w-4 h-4" viewBox="0 0 20 20">
           <defs>
-            <linearGradient id="halfGrad">
+            <linearGradient id="ppb-halfGrad">
               <stop offset="50%" stopColor="#fbbf24" />
               <stop offset="50%" stopColor="#e2e8f0" />
             </linearGradient>
           </defs>
           <path
-            fill="url(#halfGrad)"
+            fill="url(#ppb-halfGrad)"
             d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.063 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.286-3.957z"
           />
         </svg>
@@ -158,7 +156,6 @@ const StarRating: React.FC<{ rating: number; className?: string }> = ({
   );
 };
 
-/** Prime badge */
 const PrimeBadge: React.FC = () => (
   <span className="inline-flex items-center gap-1.5 bg-gradient-to-r from-[#232f3e] to-[#37475a] text-white text-[10px] font-extrabold uppercase tracking-wider px-3 py-1.5 rounded-lg shadow-md">
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -168,7 +165,6 @@ const PrimeBadge: React.FC = () => (
   </span>
 );
 
-/** FAQ accordion item */
 const FaqItem: React.FC<{
   faq: FAQItem;
   index: number;
@@ -229,7 +225,7 @@ const FaqItem: React.FC<{
 );
 
 // ============================================================================
-// TACTICAL LINK MODE (Compact Inline)
+// TACTICAL LINK MODE
 // ============================================================================
 
 const TacticalLink: React.FC<{
@@ -247,18 +243,15 @@ const TacticalLink: React.FC<{
   return (
     <div className="w-full max-w-[960px] mx-auto my-10 px-4 group/tac">
       <div className="relative bg-white border border-slate-200/80 rounded-[28px] p-5 md:p-7 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.08)] hover:shadow-[0_30px_80px_-15px_rgba(0,0,0,0.14)] hover:border-blue-200 transition-all duration-500 flex flex-col md:flex-row items-center gap-6 overflow-hidden">
-        {/* Left accent */}
         <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-blue-500 via-indigo-500 to-blue-600 rounded-l-[28px]" />
 
-        {/* Badge */}
         <div className="absolute -top-px -right-px bg-gradient-to-r from-slate-900 to-slate-800 text-white text-[8px] font-black uppercase tracking-[2px] py-1.5 px-4 rounded-bl-2xl rounded-tr-[27px] shadow-lg flex items-center gap-1.5">
           <svg width="8" height="8" viewBox="0 0 24 24" fill="#fbbf24">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
           </svg>
-          Editor's Pick
+          {"Editor's Pick"}
         </div>
 
-        {/* Image */}
         <div className="w-24 h-24 md:w-28 md:h-28 bg-gradient-to-br from-slate-50 to-white rounded-2xl flex items-center justify-center flex-shrink-0 border border-slate-100 p-3 shadow-inner group-hover/tac:scale-105 transition-transform duration-500">
           <img
             src={imageSrc}
@@ -269,7 +262,6 @@ const TacticalLink: React.FC<{
           />
         </div>
 
-        {/* Content */}
         <div className="flex-1 text-center md:text-left min-w-0 space-y-2.5">
           <div className="flex items-center justify-center md:justify-start gap-3 flex-wrap">
             <span className="text-[9px] font-black uppercase tracking-[1.5px] text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
@@ -290,7 +282,6 @@ const TacticalLink: React.FC<{
           </p>
         </div>
 
-        {/* Price + CTA */}
         <div className="flex flex-col items-center gap-3 flex-shrink-0 w-full md:w-auto">
           <div className="text-center">
             <span className="text-[9px] text-slate-400 uppercase tracking-wider font-bold block">
@@ -326,7 +317,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
   affiliateTag = 'amzwp-20',
   mode = 'ELITE_BENTO',
 }) => {
-  // ====== STATE ======
   const [imgError, setImgError] = useState(false);
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
@@ -334,7 +324,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
   const cardRef = useRef<HTMLDivElement>(null);
   const prefersReduced = useReducedMotion();
 
-  // ====== DERIVED ======
   const amazonLink = `https://www.amazon.com/dp/${product.asin}?tag=${affiliateTag}`;
 
   const imageSrc = useMemo(() => {
@@ -364,7 +353,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
 
   const handleImgError = useCallback(() => setImgError(true), []);
 
-  // ====== MOUSE TRACKING ======
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (prefersReduced || !cardRef.current) return;
@@ -377,7 +365,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
     [prefersReduced],
   );
 
-  // ====== TACTICAL MODE ======
   if (mode === 'TACTICAL_LINK') {
     return (
       <TacticalLink
@@ -390,10 +377,8 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
     );
   }
 
-  // ====== ELITE BENTO ======
   return (
     <div className="w-full max-w-[1120px] mx-auto my-16 px-4 font-sans antialiased">
-      {/* Outer wrapper with glow */}
       <div
         ref={cardRef}
         onMouseMove={handleMouseMove}
@@ -404,7 +389,7 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
         }}
         className="relative group/card"
       >
-        {/* ===== DYNAMIC BORDER GLOW ===== */}
+        {/* DYNAMIC BORDER GLOW */}
         <div
           className="absolute -inset-[1px] rounded-[44px] md:rounded-[56px] opacity-0 group-hover/card:opacity-100 transition-opacity duration-700 pointer-events-none -z-10 blur-[2px]"
           style={{
@@ -414,10 +399,10 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
           }}
         />
 
-        {/* ===== MAIN CARD ===== */}
+        {/* MAIN CARD */}
         <div className="relative bg-white rounded-[42px] md:rounded-[54px] border border-slate-200/80 shadow-[0_50px_100px_-30px_rgba(0,0,0,0.08)] overflow-hidden transition-shadow duration-700 group-hover/card:shadow-[0_60px_120px_-25px_rgba(0,0,0,0.16)] group-hover/card:border-slate-200">
 
-          {/* ===== FLOATING BADGE ===== */}
+          {/* FLOATING BADGE */}
           <div className="absolute top-0 right-0 z-30">
             <div className="relative">
               <div className="absolute inset-0 bg-gradient-to-r from-amber-400 to-orange-500 blur-xl opacity-40 rounded-bl-3xl" />
@@ -425,18 +410,18 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="#fbbf24">
                   <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                 </svg>
-                Editor's Choice
+                {"Editor's Choice"}
               </div>
             </div>
           </div>
 
-          {/* ===== AMBIENT DECORATIONS ===== */}
+          {/* AMBIENT DECORATIONS */}
           <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none" aria-hidden="true">
             <div className="absolute top-[-40%] left-[-15%] w-[500px] h-[500px] bg-gradient-to-br from-blue-100/30 to-violet-100/15 rounded-full blur-3xl" />
             <div className="absolute bottom-[-25%] right-[-8%] w-[400px] h-[400px] bg-gradient-to-tr from-amber-100/20 to-orange-100/10 rounded-full blur-3xl" />
           </div>
 
-          {/* ===== SPOTLIGHT (mouse-tracking) ===== */}
+          {/* SPOTLIGHT */}
           {!prefersReduced && (
             <div
               className="absolute inset-0 pointer-events-none transition-opacity duration-500 z-10"
@@ -447,13 +432,12 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
             />
           )}
 
-          {/* ===== BENTO GRID: IMAGE | CONTENT ===== */}
+          {/* BENTO GRID */}
           <div className="relative z-20 flex flex-col lg:flex-row items-stretch">
 
-            {/* ── LEFT: VISUAL SHOWCASE (42%) ── */}
+            {/* LEFT: VISUAL SHOWCASE */}
             <div className="lg:w-[42%] bg-gradient-to-br from-slate-50/80 via-white to-slate-50/40 border-b lg:border-b-0 lg:border-r border-slate-100/60 p-10 lg:p-14 flex flex-col items-center justify-center relative">
 
-              {/* Rating pill – top left */}
               <div className="absolute top-8 left-8 z-20">
                 <div className="bg-white/90 backdrop-blur-xl border border-slate-100 shadow-xl px-4 py-2.5 rounded-2xl flex items-center gap-3">
                   <StarRating rating={product.rating || 4.5} />
@@ -464,14 +448,12 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                 </div>
               </div>
 
-              {/* Prime pill */}
               {product.prime && (
                 <div className="absolute top-8 right-8 lg:right-auto lg:left-8 lg:top-[76px] z-20">
                   <PrimeBadge />
                 </div>
               )}
 
-              {/* Product image */}
               <a
                 href={amazonLink}
                 target="_blank"
@@ -479,7 +461,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                 className="relative group/img w-full flex items-center justify-center aspect-square lg:aspect-auto lg:h-[380px] my-8 outline-none focus-visible:ring-4 focus-visible:ring-blue-500/40 rounded-3xl"
                 aria-label={`View ${product.title} on Amazon`}
               >
-                {/* Soft glow behind image */}
                 <div
                   className="absolute inset-0 rounded-full blur-[60px] transition-transform duration-700"
                   style={{
@@ -488,7 +469,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                   }}
                 />
 
-                {/* Dashed orbit ring */}
                 <div className="absolute inset-[12%] border-2 border-dashed border-slate-200/30 rounded-full opacity-0 group-hover/img:opacity-100 transition-opacity duration-700" />
 
                 <img
@@ -506,7 +486,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                 />
               </a>
 
-              {/* Brand tag */}
               <div className="flex items-center gap-3 mt-4">
                 <div className="w-10 h-px bg-gradient-to-r from-transparent to-slate-300" />
                 <p className="text-[9px] font-black uppercase tracking-[4px] text-slate-400">
@@ -516,12 +495,11 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
               </div>
             </div>
 
-            {/* ── RIGHT: INTELLIGENCE CORE (58%) ── */}
+            {/* RIGHT: INTELLIGENCE CORE */}
             <div className="lg:w-[58%] p-10 lg:p-14 flex flex-col justify-between bg-white relative">
 
               <div className="space-y-7">
 
-                {/* Category + delivery badges */}
                 <div className="flex items-center gap-3 flex-wrap">
                   <span className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 text-[9px] font-black uppercase tracking-[2px] px-4 py-2 rounded-full border border-blue-100/80 shadow-sm">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
@@ -537,7 +515,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                   )}
                 </div>
 
-                {/* Title */}
                 <h2 className="text-3xl lg:text-[2.75rem] xl:text-5xl font-black text-slate-900 leading-[1.08] tracking-tight">
                   {product.title}
                 </h2>
@@ -545,7 +522,7 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                 {/* AI Verdict */}
                 <div className="relative">
                   <div className="absolute -left-2 -top-3 text-6xl text-blue-100/60 font-serif leading-none select-none pointer-events-none" aria-hidden="true">
-                    "
+                    {"\u201C"}
                   </div>
                   <blockquote className="relative pl-6 pr-4 py-5 border-l-[3px] border-blue-400 bg-gradient-to-r from-slate-50/80 to-transparent rounded-r-2xl">
                     <p className="text-[15px] lg:text-base font-medium text-slate-600 leading-relaxed tracking-wide">
@@ -561,14 +538,14 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                         Verified Analysis
                       </span>
                     </div>
-                    <span className="text-slate-300">·</span>
+                    <span className="text-slate-300">{"\u00B7"}</span>
                     <span className="text-[10px] font-medium text-slate-400">
                       Updated {currentDate}
                     </span>
                   </div>
                 </div>
 
-                {/* Evidence claims */}
+                {/* Evidence Claims */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {bullets.map((bullet, idx) => (
                     <div
@@ -588,11 +565,10 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                 </div>
               </div>
 
-              {/* ===== PRICE + CTA ===== */}
+              {/* PRICE + CTA */}
               <div className="mt-10 pt-8 border-t border-slate-100">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
 
-                  {/* Price */}
                   <div className="text-center sm:text-left">
                     <div className="flex items-center gap-2 justify-center sm:justify-start mb-2">
                       <span className="text-[9px] font-black uppercase text-slate-400 tracking-[3px]">
@@ -614,17 +590,14 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                     )}
                   </div>
 
-                  {/* CTA Button */}
                   <a
                     href={amazonLink}
                     target="_blank"
                     rel="nofollow sponsored noopener"
                     className="relative w-full sm:w-auto overflow-hidden group/btn rounded-2xl outline-none focus-visible:ring-4 focus-visible:ring-blue-500/40"
                   >
-                    {/* Glow behind button */}
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 rounded-2xl blur-md opacity-60 group-hover/btn:opacity-90 transition-opacity duration-300" />
 
-                    {/* Button face */}
                     <div className="relative bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white px-12 py-6 rounded-2xl text-sm font-black uppercase tracking-[3px] shadow-2xl transition-all duration-300 flex items-center justify-center gap-4 group-hover/btn:from-blue-600 group-hover/btn:via-indigo-600 group-hover/btn:to-blue-600 group-hover/btn:scale-[1.03] active:scale-[0.98]">
                       <span>Check Price</span>
                       <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover/btn:bg-white/20 transition-colors duration-300">
@@ -634,7 +607,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
                       </div>
                     </div>
 
-                    {/* Shine sweep */}
                     <div className="absolute inset-0 -translate-x-full group-hover/btn:translate-x-full transition-transform duration-1000 ease-out bg-gradient-to-r from-transparent via-white/15 to-transparent skew-x-12 pointer-events-none" />
                   </a>
                 </div>
@@ -642,7 +614,7 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
             </div>
           </div>
 
-          {/* ===== FAQ SECTION ===== */}
+          {/* FAQ SECTION */}
           {faqs.length > 0 && (
             <div className="relative z-20 bg-gradient-to-b from-slate-50/60 to-slate-100/40 border-t border-slate-200/60 p-8 lg:p-12">
               <div className="flex items-center justify-between mb-8">
@@ -680,7 +652,7 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
             </div>
           )}
 
-          {/* ===== TRUST FOOTER ===== */}
+          {/* TRUST FOOTER */}
           <div className="relative z-20 border-t border-slate-100 bg-white/80 backdrop-blur-sm px-8 lg:px-12 py-5">
             <div className="flex flex-wrap justify-center items-center gap-6 md:gap-10">
               {[
@@ -716,7 +688,6 @@ export const PremiumProductBox: React.FC<PremiumProductBoxProps> = ({
         </div>
       </div>
 
-      {/* Affiliate disclosure */}
       <p className="text-center text-[9px] text-slate-400 mt-5 max-w-lg mx-auto leading-relaxed">
         As an Amazon Associate we earn from qualifying purchases. Prices and availability are accurate as of {currentDate}.
       </p>
